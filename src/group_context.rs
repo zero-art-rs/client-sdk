@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{collections::HashMap, marker::PhantomData, vec};
 
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::{PrimeField, inv};
@@ -8,18 +8,22 @@ use ark_std::rand::prelude::StdRng;
 use art::{
     errors::ARTError,
     traits::{ARTPrivateAPI, ARTPublicAPI},
-    types::{ARTRootKey, BranchChanges, PrivateART},
+    types::{ARTRootKey, BranchChanges, PrivateART, ProverArtefacts},
 };
+use bulletproofs::r1cs::R1CSError;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
-use crypto::{CryptoError, x3dh::x3dh_a};
+use crypto::{CryptoError, schnorr, x3dh::x3dh_a};
 
 use hkdf::Hkdf;
 use prost::{DecodeError, Message};
-use sha3::Sha3_256;
+use sha3::{Digest, Sha3_256};
+use static_assertions::assert_impl_all;
+use zk::art::art_prove;
 
 use crate::{
     builders,
-    zero_art_proto::{self, group_operation::Operation},
+    proof_system::ProofSystem,
+    zero_art_proto::{self, group_operation::Operation, protected_payload_tbs, GroupOperation, Invite},
 };
 use ark_serialize::{
     CanonicalDeserialize, CanonicalSerialize, SerializationError, serialize_to_vec,
@@ -35,6 +39,10 @@ use aes_gcm::{Aes256Gcm, Key};
 // use rand::RngCore;
 use thiserror::Error;
 
+use typestate::typestate;
+
+mod utils;
+
 #[derive(Error, Debug)]
 pub enum SDKError {
     #[error("Art logic Error.")]
@@ -47,10 +55,13 @@ pub enum SDKError {
     DecodeError(#[from] DecodeError),
     #[error("Art logic Error.")]
     HKDFError(#[from] hkdf::InvalidLength),
+    #[error("Art logic Error.")]
+    R1CSError(#[from] R1CSError),
 
     #[error("Art logic Error.")]
     AesError,
 
+    // R1CSError
     #[error("Art logic Error.")]
     ARTLogicError,
     #[error("Invalid input provided")]
@@ -138,10 +149,109 @@ pub mod context_state {
     pub struct FromInvite {}
 }
 
+#[typestate]
+mod traffic_light {
+    #[automaton]
+    pub struct TrafficLight {
+        pub cycles: u64,
+    }
+
+    #[state] pub struct Green;
+    #[state] pub struct Yellow;
+    #[state] pub struct Red;
+
+    pub trait Green {
+        fn to_yellow(self) -> Yellow;
+    }
+
+    pub trait Yellow {
+        fn to_red(self) -> Red;
+    }
+
+    pub trait Red {
+        fn to_green(self) -> Green;
+        fn turn_on() -> Red;
+        fn turn_off(self);
+    }
+}
+
+#[typestate]
+mod group_context_builder {
+    #[automaton]
+    pub struct GroupContextBuilder;
+
+    #[state] pub struct Initial;
+    // #[state] pub struct End;
+
+    pub trait Initial {
+        fn new() -> Initial;
+        fn destruct(self);
+    }
+}
+
+// TODO: Use typestate pattern
+pub enum GroupContextBuilder {
+    Initial {
+        identity_key_pair: Option<KeyPair>,
+        ephemeral_key_pair: Option<KeyPair>,
+        seed: Option<[u8; 32]>,
+    },
+    NewGroup {
+        group_context: GroupContext,
+    },
+    FromInvite {
+        group_context: GroupContext,
+    },
+    FromART {
+        group_context: GroupContext,
+    }
+}
+
+impl GroupContextBuilder {
+    pub fn new() -> Self {
+        Self::Initial {identity_key_pair: None, ephemeral_key_pair: None, seed: None}
+    }
+
+    pub fn identity_key_pair(mut self, _identity_key_pair: KeyPair) -> Self {
+        match &mut self {
+            Self::Initial { identity_key_pair, ephemeral_key_pair: _, seed: _ } => {
+                *identity_key_pair = Some(_identity_key_pair)
+            }
+            _ => {}
+        }
+
+        let mut a = group_context_builder::Initial;
+        self
+    }
+
+    pub fn ephemeral_key_pair(mut self, _identity_key_pair: KeyPair) -> Self {
+        match &mut self {
+            Self::Initial { identity_key_pair, ephemeral_key_pair: _, seed: _ } => {
+                *identity_key_pair = Some(_identity_key_pair)
+            }
+            _ => {}
+        }
+        self
+    }
+
+    pub fn identity_key_pair(mut self, _identity_key_pair: KeyPair) -> Self {
+        match &mut self {
+            Self::Initial { identity_key_pair, ephemeral_key_pair: _, seed: _ } => {
+                *identity_key_pair = Some(_identity_key_pair)
+            }
+            _ => {}
+        }
+        self
+    }
+}
+
 #[derive(Default)]
 pub struct GroupContextBuilder<T> {
     identity_key_pair: Option<KeyPair>,
-    prekey: Option<KeyPair>,
+    ephemeral_key_pair: Option<KeyPair>,
+    seed: Option<[u8; 32]>,
+    invitation_keys: Option<Vec<InvitationKeys>>,
+    group_id: Option<String>,
 
     _state: PhantomData<T>,
 }
@@ -207,30 +317,98 @@ pub enum InvitationKeys {
     },
 }
 
+
+
 pub struct GroupContext {
     art: PrivateART<CortadoAffine>,
     stk: Box<[u8; 32]>,
     epoch: u64,
     group_id: String,
+    proof_system: ProofSystem,
 
-    identity_secret_key: ScalarField,
+    members: HashMap<String, zero_art_proto::User>,
+
+    rng: StdRng,
+
     identity_key_pair: KeyPair,
-    ephemeral_secret_key: ScalarField,
     ephemeral_key_pair: KeyPair,
+
+    ready: bool
 }
 
 impl GroupContext {
-    pub fn process_frame(&mut self, sp_frame: &[u8]) -> Result<Vec<u8>, SDKError> {
-        let sp_frame = zero_art_proto::SpFrame::decode(sp_frame)?;
-        let frame = sp_frame.frame.unwrap();
-        let frame_tbs = frame.frame.unwrap();
+    // pub fn new(identity_public_key: KeyPair, ephemeral_public_key: Option<KeyPair>, invitation_keys: &[InvitationKeys]) -> Self {
 
+
+
+    // }
+
+
+    // process_frame should:
+    // 1. Deserialize SP frame
+    // 2. Validate epoch correctness
+    // 3. Verify frame proof/signature
+    // 4. 
+    // 
+    pub fn process_frame(&mut self, sp_frame: &[u8]) -> Result<Vec<u8>, SDKError> {
+        // 1. Deserialize SP frame
+        let sp_frame = zero_art_proto::SpFrame::decode(sp_frame)?;
+        let mut frame = sp_frame.frame.ok_or(SDKError::InvalidInput)?;
+
+        // Strip proof/signature
+        let proof = std::mem::take(&mut frame.proof);
+        let frame_serialized_content = frame.encode_to_vec();
+
+        let mut frame_tbs = frame.frame.ok_or(SDKError::InvalidInput)?;
+
+        // Strip protected payload
+        let protected_payload = std::mem::take(&mut frame_tbs.protected_payload);
+
+        // Validate that frame belong to this group
+        if frame_tbs.group_id != self.group_id {
+            return Err(SDKError::InvalidInput);
+        }
+
+        // 2. Validate epoch correctness
         let epoch = frame_tbs.epoch;
         if self.epoch != epoch || self.epoch != epoch + 1 {
             return Err(SDKError::InvalidEpoch);
         }
 
+        // 3. Verify frame proof/signature
+        // TODO: Verify proof only for ART ops, Init and DropGroup have signature, not proof 
+        if frame_tbs.group_operation.is_none() {
+            let tk = self.art.recompute_root_key()?;
+            let ptk = (tk.generator * tk.key).into_affine();
+            // TODO: Custom error?
+            schnorr::verify(&proof, &vec![ptk], &frame_serialized_content)?;
+
+            // Decrypt protected payload and return
+            let payload = self.decrypt(&protected_payload, &frame_tbs.encode_to_vec())?;
+
+            let mut payload = zero_art_proto::ProtectedPayload::decode(&payload[..])?;
+            
+            // Strip payload signature
+            let signature = std::mem::take(&mut payload.signature);
+            let payload_tbs = payload.payload.ok_or(SDKError::InvalidInput)?;
+            match payload_tbs.sender.ok_or(SDKError::InvalidInput)? {
+                protected_payload_tbs::Sender::UserId(id) => {
+                    let sender = self.members.get(&id).ok_or(SDKError::InvalidInput)?;
+                    let sender_public_key = CortadoAffine::deserialize_uncompressed(&sender.public_key[..])?;
+
+                    schnorr::verify(&signature, &vec![sender_public_key], &payload_tbs.encode_to_vec())?;
+                },
+                protected_payload_tbs::Sender::LeafId(_) => {}
+            };
+
+
+            return Ok(vec![]);
+        }
+
+
+
         let changes = frame_tbs.group_operation.unwrap();
+
 
         match changes.operation.unwrap() {
             Operation::Init(_) => {}
@@ -240,110 +418,244 @@ impl GroupContext {
             Operation::DropGroup(_) => {}
         }
 
-        self.decrypt_payload(&frame_tbs.protected_payload)
+        self.decrypt(&frame_tbs.protected_payload, b"")
     }
 
+    // add_member should:
+    // 1. Compute new member's leaf secret
+    // 2. Add node to ART and recompute STK
+    // 3. Create frame without encrypted payload
+    // 4. Encrypt provided payload and attach to frame
+    // 5. Generate proof for ART change with SHA3-256(frame) in associated data
+    // 6. Create and Sign invite
+    // Return Frame(serialized?), Invite(serialized?)
     pub fn add_member(
         &mut self,
         invitation_keys: InvitationKeys,
         payload: &[u8],
+    ) -> Result<(Vec<u8>, Vec<u8>), SDKError> {
+        // 1. Compute new member's leaf secret
+        let member_leaf_secret = self.compute_member_leaf_secret(invitation_keys)?;
+
+        // 2. Add node to ART and recompute STK
+        let (_, changes, artefacts) = self.art.append_node(&member_leaf_secret)?;
+        self.advance_epoch()?;
+
+        // 3. Create frame without encrypted payload
+        let group_operation = builders::GroupOperationBuilder::new()
+            .operation(Operation::AddMember(changes.serialze()?))
+            .build();
+        let mut frame_tbs = builders::FrameTbsBuilder::new()
+            .epoch(self.epoch)
+            .group_id(self.group_id.clone())
+            .group_operation(group_operation)
+            .build();
+
+        // 4. Encrypt provided payload and attach to frame
+        let protected_payload = self.encrypt(payload, &frame_tbs.encode_to_vec())?;
+        frame_tbs.protected_payload = protected_payload;
+
+        let mut frame = builders::FrameBuilder::new().frame(frame_tbs).build();
+
+        // 5. Generate proof for ART change with SHA3-256(frame) in associated data
+
+        // Calculate SHA3-256 digest of frame
+        let frame_digest = Sha3_256::digest(frame.encode_to_vec());
+
+        // Prove changes
+        let proof = self
+            .proof_system
+            // review this
+            .prove(artefacts, &vec![self.art.secret_key], &frame_digest)?;
+
+        // Serialize proof
+        let mut proof_bytes = Vec::new();
+        proof.serialize_uncompressed(&mut proof_bytes)?;
+
+        frame.proof = proof_bytes;
+
+        // 6. Create and Sign invite
+        let mut invite = self.create_invite(invitation_keys)?;
+        let signature = schnorr::sign(
+            &vec![self.identity_key_pair.secret_key],
+            &vec![self.identity_key_pair.public_key],
+            &invite.encode_to_vec(),
+        )?;
+
+        invite.signature = signature;
+
+        Ok((frame.encode_to_vec(), invite.encode_to_vec()))
+    }
+
+    // remove_member should:
+    // 1. Generate temporary leaf secret
+    // 2. Make node blank in ART and recompute STK
+    // 3. Create frame without encrypted payload
+    // 4. Encrypt provided payload and attach to frame
+    // 5. Generate proof for ART change with SHA3-256(frame) in associated data
+    // Return Frame(serialized?)
+    pub fn remove_member(
+        &mut self,
+        // TOOD: We also should take new leaf secret key
+        // maybe it should be another function to add ability
+        // to user generate secrets on its own
+        public_key: CortadoAffine,
+        payload: &[u8],
     ) -> Result<Vec<u8>, SDKError> {
-        let member_leaf_secret = self.compute_leaf_secret_a(invitation_keys)?;
+        // 1. Generate temporary leaf secret
+        let temporary_leaf_secret: ark_ff::Fp<ark_ff::MontBackend<cortado::FrConfig, 4>, 4> =
+            ScalarField::rand(&mut self.rng);
 
-        // Add member leaf to the ART
-        let (tk, changes, artefacts) = self.art.append_node(&member_leaf_secret)?;
+        // 2. Make node blank in ART and recompute STK
+        let (_, changes, artefacts) = self.art.make_blank(&public_key, &temporary_leaf_secret)?;
+        self.advance_epoch()?;
 
+        // 3. Create frame without encrypted payload
+        let group_operation = builders::GroupOperationBuilder::new()
+            .operation(Operation::AddMember(changes.serialze()?))
+            .build();
+        let mut frame_tbs = builders::FrameTbsBuilder::new()
+            .epoch(self.epoch)
+            .group_id(self.group_id.clone())
+            .group_operation(group_operation)
+            .build();
+
+        // 4. Encrypt provided payload and attach to frame
+        let protected_payload = self.encrypt(payload, &frame_tbs.encode_to_vec())?;
+        frame_tbs.protected_payload = protected_payload;
+
+        let mut frame = builders::FrameBuilder::new().frame(frame_tbs).build();
+
+        // 5. Generate proof for ART change with SHA3-256(frame) in associated data
+
+        // Calculate SHA3-256 digest of frame
+        let frame_digest = Sha3_256::digest(frame.encode_to_vec());
+
+        // Prove changes
+        let proof =
+            self.proof_system
+                .prove(artefacts, &vec![self.art.secret_key], &frame_digest)?;
+
+        // Serialize proof
+        let mut proof_bytes = Vec::new();
+        proof.serialize_uncompressed(&mut proof_bytes)?;
+
+        frame.proof = proof_bytes;
+
+        Ok(frame.encode_to_vec())
+    }
+
+    // update_key should:
+    // 1. Update own leaf with provided secret and recompute STK
+    // 2. Create frame without encrypted payload
+    // 3. Encrypt provided payload and attach to frame
+    // 4. Generate proof for ART change with SHA3-256(frame) in associated data
+    // Return Frame(serialized?)
+    pub fn update_key(
+        &mut self,
+        leaf_secret: ScalarField,
+        payload: &[u8],
+    ) -> Result<Vec<u8>, SDKError> {
+        // 1. Update own leaf with provided secret and recompute STK
+        let old_secret = self.art.secret_key;
+
+        let (_, changes, artefacts) = self.art.update_key(&leaf_secret)?;
+        self.advance_epoch()?;
+
+        // 3. Create frame without encrypted payload
+        let group_operation = builders::GroupOperationBuilder::new()
+            .operation(Operation::AddMember(changes.serialze()?))
+            .build();
+        let mut frame_tbs = builders::FrameTbsBuilder::new()
+            .epoch(self.epoch)
+            .group_id(self.group_id.clone())
+            .group_operation(group_operation)
+            .build();
+
+        // 4. Encrypt provided payload and attach to frame
+        let protected_payload = self.encrypt(payload, &frame_tbs.encode_to_vec())?;
+        frame_tbs.protected_payload = protected_payload;
+
+        let mut frame = builders::FrameBuilder::new().frame(frame_tbs).build();
+
+        // 4. Generate proof for ART change with SHA3-256(frame) in associated data
+
+        // Calculate SHA3-256 digest of frame
+        let frame_digest = Sha3_256::digest(frame.encode_to_vec());
+
+        // Prove changes
+        let proof = self
+            .proof_system
+            .prove(artefacts, &vec![old_secret], &frame_digest)?;
+
+        // Serialize proof
+        let mut proof_bytes = Vec::new();
+        proof.serialize_uncompressed(&mut proof_bytes)?;
+
+        frame.proof = proof_bytes;
+
+        Ok(frame.encode_to_vec())
+    }
+
+    // Create unsigned invite
+    fn create_invite(&self, invitation_keys: InvitationKeys) -> Result<Invite, SDKError> {
         let invite_data = builders::ProtectedInviteDataBuilder::new()
             .epoch(self.epoch)
             .group_id(self.group_id.clone())
             .build()
             .encode_to_vec();
-        let protected_invite_data = self.encrypt_payload(&invite_data)?;
+        let protected_invite_data = self.encrypt(&invite_data, b"")?;
 
         // Serialize own public keys
         let mut identity_public_key_bytes = Vec::new();
-        self.identity_key_pair.public_key.serialize_compressed(&mut identity_public_key_bytes)?;
+        self.identity_key_pair
+            .public_key
+            .serialize_uncompressed(&mut identity_public_key_bytes)?;
 
         let mut ephemeral_public_key_bytes = Vec::new();
         self.ephemeral_key_pair
             .public_key
-            .serialize_compressed(&mut ephemeral_public_key_bytes)?;
+            .serialize_uncompressed(&mut ephemeral_public_key_bytes)?;
 
         // TODO: Make one builder for both invites
         // Prepare invite builders
         let identified_invite_builder = builders::IdentifiedInviteBuilder::new()
-                    .identity_public_key(identity_public_key_bytes.clone())
-                    .ephemeral_public_key(ephemeral_public_key_bytes.clone())
-                    .protected_invite_data(protected_invite_data.clone());
+            .identity_public_key(identity_public_key_bytes.clone())
+            .ephemeral_public_key(ephemeral_public_key_bytes.clone())
+            .protected_invite_data(protected_invite_data.clone());
         let unidentified_invite_builder = builders::UnidentifiedInviteBuilder::new()
-                    .identity_public_key(identity_public_key_bytes)
-                    .ephemeral_public_key(ephemeral_public_key_bytes)
-                    .protected_invite_data(protected_invite_data);
+            .identity_public_key(identity_public_key_bytes)
+            .ephemeral_public_key(ephemeral_public_key_bytes)
+            .protected_invite_data(protected_invite_data);
 
-        match invitation_keys {
+        // Create enum Invite
+        let invite = match invitation_keys {
             InvitationKeys::Identified {
                 identity_public_key: _,
                 spk_public_key,
             } => {
                 let mut spk_public_key_bytes = Vec::new();
-                spk_public_key.serialize_compressed(&mut spk_public_key_bytes)?;
+                spk_public_key.serialize_uncompressed(&mut spk_public_key_bytes)?;
 
                 let identified_invite = identified_invite_builder
                     .spk_public_key(spk_public_key_bytes)
                     .build();
-                
-
+                zero_art_proto::invite::Invite::IdentifiedInvite(identified_invite)
             }
             InvitationKeys::Unidentified {
                 invitation_secret_key,
             } => {
                 let mut invitation_secret_key_bytes = Vec::new();
-                invitation_secret_key.serialize_compressed(&mut invitation_secret_key_bytes)?;
+                invitation_secret_key.serialize_uncompressed(&mut invitation_secret_key_bytes)?;
 
                 let unidentified_invite = unidentified_invite_builder
                     .private_key(invitation_secret_key_bytes)
                     .build();
+                zero_art_proto::invite::Invite::UnidentifiedInvite(unidentified_invite)
             }
         };
 
-        // builders::InviteBuilder::new().invite(invite)
-
-        // let (_, changes_2, artefacts_2) = art_1.append_node_public_art(&some_secret_key1).unwrap();
-
-        // let (tk, changes) = self.art.update_key(&secret)?;
-        // self.update_stk(tk)?;
-
-        Ok(vec![])
-    }
-
-    pub fn remove_member(&mut self, payload: &[u8]) -> Result<Vec<u8>, SDKError> {
-        Ok(vec![])
-    }
-
-    pub fn update_secret(
-        &mut self,
-        secret: ScalarField,
-        payload: &[u8],
-    ) -> Result<Vec<u8>, SDKError> {
-        let (tk, changes, artefacts) = self.art.update_key(&secret)?;
-        self.update_stk(tk)?;
-
-        let protected_payload = self.encrypt_payload(payload)?;
-        let group_operation = builders::GroupOperationBuilder::new()
-            .operation(Operation::KeyUpdate(changes.serialze()?))
-            .build();
-
-        let frame_tbs = builders::FrameTbsBuilder::new()
-            .epoch(self.epoch)
-            .protected_payload(protected_payload)
-            .group_operation(group_operation)
-            .build();
-
-        Ok(builders::FrameBuilder::new()
-            .frame(frame_tbs)
-            .proof(vec![])
-            .build()
-            .encode_to_vec())
+        Ok(builders::InviteBuilder::new().invite(invite).build())
     }
 
     fn apply_changes(&mut self, changes: &[u8]) -> Result<(), SDKError> {
@@ -359,97 +671,6 @@ impl GroupContext {
         self.epoch += 1;
         Ok(())
     }
-
-    fn update_stk(&mut self, tk: ARTRootKey<CortadoAffine>) -> Result<(), SDKError> {
-        // self.stk = Key::<Aes256Gcm>::from(hkdf(Some(b"stage-key-derivation"), &serialize_to_vec![tk.key]?)?);
-
-        // Increment epoch
-        self.epoch += 1;
-        Ok(())
-    }
-
-    fn encrypt_payload(&self, plaintext: &[u8]) -> Result<Vec<u8>, SDKError> {
-        let h = Hkdf::<Sha3_256>::new(Some(b"encryption-key-derivation"), &self.stk[..]);
-
-        // AES 256 key size - 32 bytes, nonce - 12 bytes
-        let mut okm = [0u8; 32 + 12];
-        h.expand(&[], &mut okm)?;
-
-        let (key, nonce) = (&okm[..32], &okm[32..]);
-        let key = Key::<Aes256Gcm>::from_slice(key);
-        let nonce = Nonce::<Aes256Gcm>::from_slice(&nonce);
-
-        let cipher = Aes256Gcm::new(key);
-
-        cipher
-            .encrypt(nonce, plaintext)
-            .map_err(|_| SDKError::AesError)
-    }
-
-    fn decrypt_payload(&self, ciphertext: &[u8]) -> Result<Vec<u8>, SDKError> {
-        let h = Hkdf::<Sha3_256>::new(Some(b"encryption-key-derivation"), &self.stk[..]);
-
-        // AES 256 key size - 32 bytes, nonce - 12 bytes
-        let mut okm = [0u8; 32 + 12];
-        h.expand(&[], &mut okm)?;
-
-        let (key, nonce) = (&okm[..32], &okm[32..]);
-        let key = Key::<Aes256Gcm>::from_slice(key);
-        let nonce = Nonce::<Aes256Gcm>::from_slice(&nonce);
-
-        let cipher = Aes256Gcm::new(key);
-
-        cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|_| SDKError::AesError)
-    }
-
-    fn compute_leaf_secret_a(&self, invitation_keys: InvitationKeys) -> Result<ScalarField, SDKError> {
-        // Compute new member leaf secret
-        let (identity_public_key, invitation_public_key) = match invitation_keys {
-            InvitationKeys::Identified {
-                identity_public_key,
-                spk_public_key,
-            } => (
-                identity_public_key,
-                spk_public_key.unwrap_or(identity_public_key),
-            ),
-            InvitationKeys::Unidentified {
-                invitation_secret_key,
-            } => {
-                let invitation_public_key =
-                    (CortadoAffine::generator() * invitation_secret_key).into_affine();
-                (invitation_public_key, invitation_public_key)
-            }
-        };
-        
-        let member_leaf_secret = ScalarField::from_le_bytes_mod_order(&x3dh_a(
-            self.identity_secret_key,
-            self.ephemeral_secret_key,
-            identity_public_key,
-            invitation_public_key,
-        )?);
-        Ok(member_leaf_secret)
-    }
-
-    // TODO: compute_leaf_secret_b for acceptor
-
-    // fn decrypt(&self, encrypted_data: &[u8]) -> Result<Vec<u8>, EncryptionError> {
-    //     let cipher = Aes256Gcm::new(&self.stk);
-
-    //     if encrypted_data.len() < 12 {
-    //         return Err(EncryptionError::InvalidFormat);
-    //     }
-
-    //     let (nonce_bytes, ciphertext) = encrypted_data.split_at(12);
-    //     let nonce = Nonce::from_slice(nonce_bytes);
-
-    //     let plaintext = cipher
-    //         .decrypt(nonce, ciphertext)
-    //         .map_err(|_| EncryptionError::DecryptionFailed)?;
-
-    //     Ok(plaintext)
-    // }
 }
 
 // impl GroupContextBuilder<context_state::WithIdentity> {
@@ -528,14 +749,6 @@ impl ArtManager {
         // Self { art: (), stk: (), epoch: () }
     }
 
-    fn apply_changes(&mut self, changes: &[u8]) -> Result<(), SDKError> {
-        let changes = BranchChanges::deserialize(changes)?;
-        self.art.update_private_art(&changes)?;
-        let tk = self.art.recompute_root_key()?;
-        self.stk = Box::new(hkdf(None, &serialize_to_vec![tk.key]?)?);
-        Ok(())
-    }
-
     fn process_frame(&mut self, frame: zero_art_proto::Frame) -> Result<(), SDKError> {
         if frame.frame.is_none() {
             // return error
@@ -551,13 +764,13 @@ impl ArtManager {
 
             let operation = grp_operation.operation.unwrap();
 
-            match operation {
-                Operation::Init(_) => {}
-                Operation::AddMember(changes) => self.apply_changes(&changes)?,
-                Operation::RemoveMember(changes) => self.apply_changes(&changes)?,
-                Operation::KeyUpdate(changes) => self.apply_changes(&changes)?,
-                Operation::DropGroup(changes) => self.apply_changes(&changes)?,
-            }
+            // match operation {
+            //     Operation::Init(_) => {}
+            //     Operation::AddMember(changes) => self.apply_changes(&changes)?,
+            //     Operation::RemoveMember(changes) => self.apply_changes(&changes)?,
+            //     Operation::KeyUpdate(changes) => self.apply_changes(&changes)?,
+            //     Operation::DropGroup(_) => self.apply_changes(&changes)?,
+            // }
         }
 
         Ok(())
@@ -570,13 +783,6 @@ impl ArtManager {
 // impl ArtManager {
 //     fn from_
 // }
-
-fn hkdf(salt: Option<&[u8]>, ikm: &[u8]) -> Result<[u8; 32], CryptoError> {
-    let h = Hkdf::<Sha3_256>::new(salt, &ikm);
-    let mut okm = [0u8; 32];
-    h.expand(&[], &mut okm)?;
-    Ok(okm)
-}
 
 #[cfg(test)]
 mod tests {

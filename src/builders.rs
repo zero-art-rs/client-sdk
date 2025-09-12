@@ -1,4 +1,5 @@
-use crate::zero_art_proto::{Frame, FrameTbs, GroupOperation, IdentifiedInvite, Invite, ProtectedInviteData,
+use crate::zero_art_proto::{
+    Frame, FrameTbs, GroupOperation, IdentifiedInvite, Invite, ProtectedInviteData,
     UnidentifiedInvite, group_operation::Operation, invite,
 };
 
@@ -7,6 +8,12 @@ pub struct FrameTbsBuilder(FrameTbs);
 impl FrameTbsBuilder {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    // TODO: Replace String with &str or AsRef<str>
+    pub fn group_id(mut self, group_id: String) -> Self {
+        self.0.group_id = group_id;
+        self
     }
 
     pub fn epoch(mut self, epoch: u64) -> Self {
