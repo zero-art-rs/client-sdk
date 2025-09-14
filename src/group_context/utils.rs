@@ -30,7 +30,13 @@ impl GroupContext {
         let cipher = Aes256Gcm::new(key);
 
         cipher
-            .encrypt(nonce, Payload {msg: plaintext, aad})
+            .encrypt(
+                nonce,
+                Payload {
+                    msg: plaintext,
+                    aad,
+                },
+            )
             .map_err(|_| SDKError::AesError)
     }
 
@@ -48,7 +54,13 @@ impl GroupContext {
         let cipher = Aes256Gcm::new(key);
 
         cipher
-            .decrypt(nonce, Payload {msg: ciphertext, aad})
+            .decrypt(
+                nonce,
+                Payload {
+                    msg: ciphertext,
+                    aad,
+                },
+            )
             .map_err(|_| SDKError::AesError)
     }
 

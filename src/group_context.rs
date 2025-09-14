@@ -11,6 +11,7 @@ use art::{
     types::{ARTRootKey, BranchChanges, PrivateART, ProverArtefacts},
 };
 use bulletproofs::r1cs::R1CSError;
+use chrono::{DateTime, Utc};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use crypto::{CryptoError, schnorr, x3dh::x3dh_a};
 
@@ -23,7 +24,9 @@ use zk::art::art_prove;
 use crate::{
     builders,
     proof_system::ProofSystem,
-    zero_art_proto::{self, group_operation::Operation, protected_payload_tbs, GroupOperation, Invite},
+    zero_art_proto::{
+        self, GroupOperation, Invite, group_operation::Operation, protected_payload_tbs,
+    },
 };
 use ark_serialize::{
     CanonicalDeserialize, CanonicalSerialize, SerializationError, serialize_to_vec,
@@ -38,8 +41,6 @@ use aes_gcm::{Aes256Gcm, Key};
 // use rand::rngs::OsRng;
 // use rand::RngCore;
 use thiserror::Error;
-
-use typestate::typestate;
 
 mod utils;
 
@@ -149,163 +150,124 @@ pub mod context_state {
     pub struct FromInvite {}
 }
 
-#[typestate]
-mod traffic_light {
-    #[automaton]
-    pub struct TrafficLight {
-        pub cycles: u64,
-    }
-
-    #[state] pub struct Green;
-    #[state] pub struct Yellow;
-    #[state] pub struct Red;
-
-    pub trait Green {
-        fn to_yellow(self) -> Yellow;
-    }
-
-    pub trait Yellow {
-        fn to_red(self) -> Red;
-    }
-
-    pub trait Red {
-        fn to_green(self) -> Green;
-        fn turn_on() -> Red;
-        fn turn_off(self);
-    }
-}
-
-#[typestate]
-mod group_context_builder {
-    #[automaton]
-    pub struct GroupContextBuilder;
-
-    #[state] pub struct Initial;
-    // #[state] pub struct End;
-
-    pub trait Initial {
-        fn new() -> Initial;
-        fn destruct(self);
-    }
-}
-
 // TODO: Use typestate pattern
-pub enum GroupContextBuilder {
-    Initial {
-        identity_key_pair: Option<KeyPair>,
-        ephemeral_key_pair: Option<KeyPair>,
-        seed: Option<[u8; 32]>,
-    },
-    NewGroup {
-        group_context: GroupContext,
-    },
-    FromInvite {
-        group_context: GroupContext,
-    },
-    FromART {
-        group_context: GroupContext,
-    }
-}
+// pub enum GroupContextBuilder {
+//     Initial {
+//         identity_key_pair: Option<KeyPair>,
+//         ephemeral_key_pair: Option<KeyPair>,
+//         seed: Option<[u8; 32]>,
+//     },
+//     NewGroup {
+//         group_context: GroupContext,
+//     },
+//     FromInvite {
+//         group_context: GroupContext,
+//     },
+//     FromART {
+//         group_context: GroupContext,
+//     }
+// }
 
-impl GroupContextBuilder {
-    pub fn new() -> Self {
-        Self::Initial {identity_key_pair: None, ephemeral_key_pair: None, seed: None}
-    }
+// impl GroupContextBuilder {
+//     pub fn new() -> Self {
+//         Self::Initial {identity_key_pair: None, ephemeral_key_pair: None, seed: None}
+//     }
 
-    pub fn identity_key_pair(mut self, _identity_key_pair: KeyPair) -> Self {
-        match &mut self {
-            Self::Initial { identity_key_pair, ephemeral_key_pair: _, seed: _ } => {
-                *identity_key_pair = Some(_identity_key_pair)
-            }
-            _ => {}
-        }
+//     pub fn identity_key_pair(mut self, _identity_key_pair: KeyPair) -> Self {
+//         match &mut self {
+//             Self::Initial { identity_key_pair, ephemeral_key_pair: _, seed: _ } => {
+//                 *identity_key_pair = Some(_identity_key_pair)
+//             }
+//             _ => {}
+//         }
 
-        let mut a = group_context_builder::Initial;
-        self
-    }
+//         self
+//     }
 
-    pub fn ephemeral_key_pair(mut self, _identity_key_pair: KeyPair) -> Self {
-        match &mut self {
-            Self::Initial { identity_key_pair, ephemeral_key_pair: _, seed: _ } => {
-                *identity_key_pair = Some(_identity_key_pair)
-            }
-            _ => {}
-        }
-        self
-    }
+//     pub fn ephemeral_key_pair(mut self, _identity_key_pair: KeyPair) -> Self {
+//         match &mut self {
+//             Self::Initial { identity_key_pair, ephemeral_key_pair: _, seed: _ } => {
+//                 *identity_key_pair = Some(_identity_key_pair)
+//             }
+//             _ => {}
+//         }
+//         self
+//     }
 
-    pub fn identity_key_pair(mut self, _identity_key_pair: KeyPair) -> Self {
-        match &mut self {
-            Self::Initial { identity_key_pair, ephemeral_key_pair: _, seed: _ } => {
-                *identity_key_pair = Some(_identity_key_pair)
-            }
-            _ => {}
-        }
-        self
-    }
-}
+//     pub fn identity_key_pair(mut self, _identity_key_pair: KeyPair) -> Self {
+//         match &mut self {
+//             Self::Initial { identity_key_pair, ephemeral_key_pair: _, seed: _ } => {
+//                 *identity_key_pair = Some(_identity_key_pair)
+//             }
+//             _ => {}
+//         }
+//         self
+//     }
+// }
 
-#[derive(Default)]
-pub struct GroupContextBuilder<T> {
-    identity_key_pair: Option<KeyPair>,
-    ephemeral_key_pair: Option<KeyPair>,
-    seed: Option<[u8; 32]>,
-    invitation_keys: Option<Vec<InvitationKeys>>,
-    group_id: Option<String>,
+// HERE BUILDER
+// #[derive(Default)]
+// pub struct GroupContextBuilder<T> {
+//     identity_key_pair: Option<KeyPair>,
+//     ephemeral_key_pair: Option<KeyPair>,
+//     seed: Option<[u8; 32]>,
+//     invitation_keys: Option<Vec<InvitationKeys>>,
+//     group_id: Option<String>,
 
-    _state: PhantomData<T>,
-}
+//     _state: PhantomData<T>,
+// }
 
-impl<S> GroupContextBuilder<S> {
-    fn change_state<U>(self) -> GroupContextBuilder<U> {
-        GroupContextBuilder {
-            identity_key_pair: self.identity_key_pair,
-            prekey: self.prekey,
-            _state: PhantomData,
-        }
-    }
-}
+// impl<S> GroupContextBuilder<S> {
+//     fn change_state<U>(self) -> GroupContextBuilder<U> {
+//         GroupContextBuilder {
+//             identity_key_pair: self.identity_key_pair,
+//             prekey: self.prekey,
+//             _state: PhantomData,
+//         }
+//     }
+// }
 
-impl GroupContextBuilder<context_state::Initial> {
-    pub fn new() -> Self {
-        Self::default()
-    }
+// impl GroupContextBuilder<context_state::Initial> {
+//     pub fn new() -> Self {
+//         Self::default()
+//     }
 
-    pub fn with_identity(mut self, identity_key_pair: KeyPair) -> Self {
-        self.identity_key_pair = Some(identity_key_pair);
-        self
-    }
+//     pub fn with_identity(mut self, identity_key_pair: KeyPair) -> Self {
+//         self.identity_key_pair = Some(identity_key_pair);
+//         self
+//     }
 
-    pub fn with_prekey(mut self, prekey: KeyPair) -> Self {
-        self.prekey = Some(prekey);
-        self
-    }
+//     pub fn with_prekey(mut self, prekey: KeyPair) -> Self {
+//         self.prekey = Some(prekey);
+//         self
+//     }
 
-    fn fill(&mut self) {
-        if self.identity_key_pair.is_none() {
-            let secret_key = ScalarField::rand(&mut thread_rng());
-            self.identity_key_pair = Some(KeyPair::from_secret_key(secret_key));
-        }
+//     fn fill(&mut self) {
+//         if self.identity_key_pair.is_none() {
+//             let secret_key = ScalarField::rand(&mut thread_rng());
+//             self.identity_key_pair = Some(KeyPair::from_secret_key(secret_key));
+//         }
 
-        if self.prekey.is_none() {
-            let secret_key = ScalarField::rand(&mut thread_rng());
-            self.prekey = Some(KeyPair::from_secret_key(secret_key));
-        }
-    }
+//         if self.prekey.is_none() {
+//             let secret_key = ScalarField::rand(&mut thread_rng());
+//             self.prekey = Some(KeyPair::from_secret_key(secret_key));
+//         }
+//     }
 
-    fn from_invite(mut self, invite: &[u8]) -> GroupContextBuilder<context_state::FromInvite> {
-        self.fill();
-        self.change_state()
-    }
+//     fn from_invite(mut self, invite: &[u8]) -> GroupContextBuilder<context_state::FromInvite> {
+//         self.fill();
+//         self.change_state()
+//     }
 
-    fn create(mut self) -> GroupContextBuilder<context_state::NewGroup> {
-        self.fill();
-        self.change_state()
-    }
+//     fn create(mut self) -> GroupContextBuilder<context_state::NewGroup> {
+//         self.fill();
+//         self.change_state()
+//     }
 
-    // fn from_art(mut self, a)
-}
+//     // fn from_art(mut self, a)
+// }
 
+// TODO: Add serialization
 #[derive(Clone, Copy)]
 pub enum InvitationKeys {
     Identified {
@@ -317,7 +279,21 @@ pub enum InvitationKeys {
     },
 }
 
+// message GroupInfo {
+//   string id = 1; // document id
+//   string name = 2; // document name
+//   google.protobuf.Timestamp created = 3; // document creation time
+//   bytes picture = 4;
+//   repeated User members = 10; // membership list of document
+// }
 
+// message User {
+//   string id = 1; // actor id
+//   string name = 2; // user name
+//   bytes public_key = 3; // user identity public key
+//   bytes picture = 4; // user picture
+//   Role role = 5; // user role
+// }
 
 pub struct GroupContext {
     art: PrivateART<CortadoAffine>,
@@ -333,23 +309,20 @@ pub struct GroupContext {
     identity_key_pair: KeyPair,
     ephemeral_key_pair: KeyPair,
 
-    ready: bool
+    ready: bool,
 }
 
 impl GroupContext {
     // pub fn new(identity_public_key: KeyPair, ephemeral_public_key: Option<KeyPair>, invitation_keys: &[InvitationKeys]) -> Self {
 
-
-
     // }
-
 
     // process_frame should:
     // 1. Deserialize SP frame
     // 2. Validate epoch correctness
     // 3. Verify frame proof/signature
-    // 4. 
-    // 
+    // 4.
+    //
     pub fn process_frame(&mut self, sp_frame: &[u8]) -> Result<Vec<u8>, SDKError> {
         // 1. Deserialize SP frame
         let sp_frame = zero_art_proto::SpFrame::decode(sp_frame)?;
@@ -376,7 +349,7 @@ impl GroupContext {
         }
 
         // 3. Verify frame proof/signature
-        // TODO: Verify proof only for ART ops, Init and DropGroup have signature, not proof 
+        // TODO: Verify proof only for ART ops, Init and DropGroup have signature, not proof
         if frame_tbs.group_operation.is_none() {
             let tk = self.art.recompute_root_key()?;
             let ptk = (tk.generator * tk.key).into_affine();
@@ -387,28 +360,29 @@ impl GroupContext {
             let payload = self.decrypt(&protected_payload, &frame_tbs.encode_to_vec())?;
 
             let mut payload = zero_art_proto::ProtectedPayload::decode(&payload[..])?;
-            
+
             // Strip payload signature
             let signature = std::mem::take(&mut payload.signature);
             let payload_tbs = payload.payload.ok_or(SDKError::InvalidInput)?;
             match payload_tbs.sender.ok_or(SDKError::InvalidInput)? {
                 protected_payload_tbs::Sender::UserId(id) => {
                     let sender = self.members.get(&id).ok_or(SDKError::InvalidInput)?;
-                    let sender_public_key = CortadoAffine::deserialize_uncompressed(&sender.public_key[..])?;
+                    let sender_public_key =
+                        CortadoAffine::deserialize_uncompressed(&sender.public_key[..])?;
 
-                    schnorr::verify(&signature, &vec![sender_public_key], &payload_tbs.encode_to_vec())?;
-                },
+                    schnorr::verify(
+                        &signature,
+                        &vec![sender_public_key],
+                        &payload_tbs.encode_to_vec(),
+                    )?;
+                }
                 protected_payload_tbs::Sender::LeafId(_) => {}
             };
-
 
             return Ok(vec![]);
         }
 
-
-
         let changes = frame_tbs.group_operation.unwrap();
-
 
         match changes.operation.unwrap() {
             Operation::Init(_) => {}
@@ -429,6 +403,7 @@ impl GroupContext {
     // 5. Generate proof for ART change with SHA3-256(frame) in associated data
     // 6. Create and Sign invite
     // Return Frame(serialized?), Invite(serialized?)
+    // invitation_keys -> User
     pub fn add_member(
         &mut self,
         invitation_keys: InvitationKeys,
@@ -499,6 +474,7 @@ impl GroupContext {
         // TOOD: We also should take new leaf secret key
         // maybe it should be another function to add ability
         // to user generate secrets on its own
+        // public_key -> actor_id
         public_key: CortadoAffine,
         payload: &[u8],
     ) -> Result<Vec<u8>, SDKError> {
@@ -657,6 +633,8 @@ impl GroupContext {
 
         Ok(builders::InviteBuilder::new().invite(invite).build())
     }
+
+    pub fn create_frame() {}
 
     fn apply_changes(&mut self, changes: &[u8]) -> Result<(), SDKError> {
         self.art
