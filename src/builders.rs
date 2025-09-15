@@ -1,6 +1,9 @@
+use prost_types::Timestamp;
+
 use crate::zero_art_proto::{
-    Frame, FrameTbs, GroupOperation, IdentifiedInvite, Invite, ProtectedInviteData,
-    UnidentifiedInvite, group_operation::Operation, invite,
+    Frame, FrameTbs, GroupOperation, IdentifiedInvite, Invite, Payload, ProtectedInviteData,
+    ProtectedPayload, ProtectedPayloadTbs, UnidentifiedInvite, group_operation::Operation, invite,
+    protected_payload_tbs::Sender,
 };
 
 #[derive(Default)]
@@ -185,6 +188,60 @@ impl ProtectedInviteDataBuilder {
     }
 
     pub fn build(self) -> ProtectedInviteData {
+        self.0
+    }
+}
+
+#[derive(Default)]
+pub struct ProtectedPayloadTbsBuilder(ProtectedPayloadTbs);
+impl ProtectedPayloadTbsBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn seq_num(mut self, seq_num: u64) -> Self {
+        self.0.seq_num = seq_num;
+        self
+    }
+
+    pub fn sender(mut self, sender: Sender) -> Self {
+        self.0.sender = Some(sender);
+        self
+    }
+
+    pub fn created(mut self, created: Timestamp) -> Self {
+        self.0.created = Some(created);
+        self
+    }
+
+    pub fn payload(mut self, payload: Vec<Payload>) -> Self {
+        self.0.payload = payload;
+        self
+    }
+
+    pub fn build(self) -> ProtectedPayloadTbs {
+        self.0
+    }
+}
+
+#[derive(Default)]
+pub struct ProtectedPayloadBuilder(ProtectedPayload);
+impl ProtectedPayloadBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn payload(mut self, payload: ProtectedPayloadTbs) -> Self {
+        self.0.payload = Some(payload);
+        self
+    }
+
+    pub fn signature(mut self, signature: Vec<u8>) -> Self {
+        self.0.signature = signature;
+        self
+    }
+
+    pub fn build(self) -> ProtectedPayload {
         self.0
     }
 }

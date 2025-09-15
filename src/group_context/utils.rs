@@ -30,13 +30,7 @@ impl GroupContext {
         let cipher = Aes256Gcm::new(key);
 
         cipher
-            .encrypt(
-                nonce,
-                Payload {
-                    msg: plaintext,
-                    aad,
-                },
-            )
+            .encrypt(nonce, Payload {msg: plaintext, aad})
             .map_err(|_| SDKError::AesError)
     }
 
@@ -54,13 +48,7 @@ impl GroupContext {
         let cipher = Aes256Gcm::new(key);
 
         cipher
-            .decrypt(
-                nonce,
-                Payload {
-                    msg: ciphertext,
-                    aad,
-                },
-            )
+            .decrypt(nonce, Payload {msg: ciphertext, aad})
             .map_err(|_| SDKError::AesError)
     }
 
@@ -94,65 +82,7 @@ impl GroupContext {
         )?);
         Ok(member_leaf_secret)
     }
-
-    // // Wrapped ART append node for atomically updating epoch and stage key
-    // pub(super) fn append_node(
-    //     &mut self,
-    //     secret_key: &ScalarField,
-    // ) -> Result<
-    //     (
-    //         ARTRootKey<CortadoAffine>,
-    //         BranchChanges<CortadoAffine>,
-    //         ProverArtefacts<CortadoAffine>,
-    //     ),
-    //     SDKError,
-    // > {
-    //     let (tk, changes, artefacts) = self.art.append_node(secret_key)?;
-
-    //     self.advance_epoch()?;
-
-    //     Ok((tk, changes, artefacts))
-    // }
-
-    // pub(super) fn update_art(
-    //     &mut self,
-    //     changes: &BranchChanges<CortadoAffine>,
-    // ) -> Result<(), SDKError> {
-    //     self.art.update_private_art(&changes)?;
-
-    //     self.advance_epoch()
-    // }
-
-    // pub(super) fn make_blank(
-    //     &mut self,
-    //     public_key: CortadoAffine,
-    //     temporary_secret_key: ScalarField,
-    // ) -> Result<
-    //     (
-    //         ARTRootKey<CortadoAffine>,
-    //         BranchChanges<CortadoAffine>,
-    //         ProverArtefacts<CortadoAffine>,
-    //     ),
-    //     SDKError,
-    // > {
-    //     let (tk, changes, artefacts) = self.art.make_blank(&public_key, &temporary_secret_key)?;
-
-    //     self.advance_epoch();
-
-    //     Ok((tk, changes, artefacts))
-    // }
-
-    // pub(super) fn update_key(
-    //     &mut self,
-    //     new_secret_key: &ScalarField,
-    // ) -> Result<(ARTRootKey<CortadoAffine>, BranchChanges<CortadoAffine>, ProverArtefacts<CortadoAffine>), SDKError> {
-    //     let (tk, changes, artefacts) = self.art.update_key(new_secret_key)?;
-
-    //     self.advance_epoch()?;
-
-    //     Ok((tk, changes, artefacts))
-    // }
-
+    
     /// Compute next STK and increment epoch
     ///
     /// Should be carefully used, because you can't move backward

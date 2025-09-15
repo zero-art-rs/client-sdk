@@ -3,12 +3,12 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use cortado::CortadoAffine;
 use prost::Message;
 
-pub struct Id(String);
-
 pub struct User {
-    id: Id,
+    id: String,
     name: String,
-    public_key: CortadoAffine,
+    pub public_key: CortadoAffine,
+    // Used only for group creation
+    spk: Option<CortadoAffine>,
     picture: Vec<u8>,
     // ?: Should we create separate enum?
     role: zero_art_proto::Role,
@@ -17,6 +17,22 @@ pub struct User {
 // TODO: Replace .unwrap() with errors
 // TODO: Add TryFrom/From trait impls
 impl User {
+    pub fn new(name: String, picture: Vec<u8>, public_key: CortadoAffine, spk: Option<CortadoAffine>) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            public_key,
+            spk,
+            picture,
+            role: zero_art_proto::Role::Write,
+        }
+    }
+
+    // TODO: Rewrite this
+    pub fn id(&self) -> String {
+        self.id.clone()
+    }
+
     // pub fn serialize() {
 
     // }
@@ -32,7 +48,7 @@ impl User {
             .unwrap();
 
         zero_art_proto::User {
-            id: self.id.0.clone(),
+            id: self.id.clone(),
             name: self.name.clone(),
             public_key: public_key_bytes,
             picture: self.picture.clone(),
@@ -45,11 +61,12 @@ impl User {
         let role = zero_art_proto::Role::try_from(user.role).unwrap();
 
         Self {
-            id: Id(user.id.clone()),
+            id: user.id.clone(),
             name: user.name.clone(),
             public_key,
             picture: user.picture.clone(),
             role,
+            spk: None
         }
     }
 

@@ -2,9 +2,9 @@ use std::{collections::HashMap, marker::PhantomData, vec};
 
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::{PrimeField, inv};
-use ark_std::UniformRand;
 use ark_std::rand::SeedableRng;
 use ark_std::rand::prelude::StdRng;
+use ark_std::{UniformRand, rand::Rng};
 use art::{
     errors::ARTError,
     traits::{ARTPrivateAPI, ARTPublicAPI},
@@ -17,12 +17,13 @@ use crypto::{CryptoError, schnorr, x3dh::x3dh_a};
 
 use hkdf::Hkdf;
 use prost::{DecodeError, Message};
+use prost_types::Timestamp;
 use sha3::{Digest, Sha3_256};
 use static_assertions::assert_impl_all;
 use zk::art::art_prove;
 
 use crate::{
-    builders,
+    builders, metadata,
     proof_system::ProofSystem,
     zero_art_proto::{
         self, GroupOperation, Invite, group_operation::Operation, protected_payload_tbs,
@@ -94,16 +95,6 @@ pub struct KeyPair {
 }
 
 impl KeyPair {
-    pub fn new() -> Self {
-        let secret_key = ScalarField::rand(&mut StdRng::seed_from_u64(rand::random()));
-        let public_key = (CortadoAffine::generator() * secret_key).into_affine();
-
-        Self {
-            public_key,
-            secret_key,
-        }
-    }
-
     pub fn from_secret_key(secret_key: ScalarField) -> Self {
         let public_key = (CortadoAffine::generator() * secret_key).into_affine();
 
@@ -139,134 +130,6 @@ impl IdentifiedPublicKeys {
     }
 }
 
-pub mod context_state {
-    #[derive(Default)]
-    pub struct Initial {}
-    #[derive(Default)]
-    pub struct NewGroup {}
-    #[derive(Default)]
-    pub struct FromART {}
-    #[derive(Default)]
-    pub struct FromInvite {}
-}
-
-// TODO: Use typestate pattern
-// pub enum GroupContextBuilder {
-//     Initial {
-//         identity_key_pair: Option<KeyPair>,
-//         ephemeral_key_pair: Option<KeyPair>,
-//         seed: Option<[u8; 32]>,
-//     },
-//     NewGroup {
-//         group_context: GroupContext,
-//     },
-//     FromInvite {
-//         group_context: GroupContext,
-//     },
-//     FromART {
-//         group_context: GroupContext,
-//     }
-// }
-
-// impl GroupContextBuilder {
-//     pub fn new() -> Self {
-//         Self::Initial {identity_key_pair: None, ephemeral_key_pair: None, seed: None}
-//     }
-
-//     pub fn identity_key_pair(mut self, _identity_key_pair: KeyPair) -> Self {
-//         match &mut self {
-//             Self::Initial { identity_key_pair, ephemeral_key_pair: _, seed: _ } => {
-//                 *identity_key_pair = Some(_identity_key_pair)
-//             }
-//             _ => {}
-//         }
-
-//         self
-//     }
-
-//     pub fn ephemeral_key_pair(mut self, _identity_key_pair: KeyPair) -> Self {
-//         match &mut self {
-//             Self::Initial { identity_key_pair, ephemeral_key_pair: _, seed: _ } => {
-//                 *identity_key_pair = Some(_identity_key_pair)
-//             }
-//             _ => {}
-//         }
-//         self
-//     }
-
-//     pub fn identity_key_pair(mut self, _identity_key_pair: KeyPair) -> Self {
-//         match &mut self {
-//             Self::Initial { identity_key_pair, ephemeral_key_pair: _, seed: _ } => {
-//                 *identity_key_pair = Some(_identity_key_pair)
-//             }
-//             _ => {}
-//         }
-//         self
-//     }
-// }
-
-// HERE BUILDER
-// #[derive(Default)]
-// pub struct GroupContextBuilder<T> {
-//     identity_key_pair: Option<KeyPair>,
-//     ephemeral_key_pair: Option<KeyPair>,
-//     seed: Option<[u8; 32]>,
-//     invitation_keys: Option<Vec<InvitationKeys>>,
-//     group_id: Option<String>,
-
-//     _state: PhantomData<T>,
-// }
-
-// impl<S> GroupContextBuilder<S> {
-//     fn change_state<U>(self) -> GroupContextBuilder<U> {
-//         GroupContextBuilder {
-//             identity_key_pair: self.identity_key_pair,
-//             prekey: self.prekey,
-//             _state: PhantomData,
-//         }
-//     }
-// }
-
-// impl GroupContextBuilder<context_state::Initial> {
-//     pub fn new() -> Self {
-//         Self::default()
-//     }
-
-//     pub fn with_identity(mut self, identity_key_pair: KeyPair) -> Self {
-//         self.identity_key_pair = Some(identity_key_pair);
-//         self
-//     }
-
-//     pub fn with_prekey(mut self, prekey: KeyPair) -> Self {
-//         self.prekey = Some(prekey);
-//         self
-//     }
-
-//     fn fill(&mut self) {
-//         if self.identity_key_pair.is_none() {
-//             let secret_key = ScalarField::rand(&mut thread_rng());
-//             self.identity_key_pair = Some(KeyPair::from_secret_key(secret_key));
-//         }
-
-//         if self.prekey.is_none() {
-//             let secret_key = ScalarField::rand(&mut thread_rng());
-//             self.prekey = Some(KeyPair::from_secret_key(secret_key));
-//         }
-//     }
-
-//     fn from_invite(mut self, invite: &[u8]) -> GroupContextBuilder<context_state::FromInvite> {
-//         self.fill();
-//         self.change_state()
-//     }
-
-//     fn create(mut self) -> GroupContextBuilder<context_state::NewGroup> {
-//         self.fill();
-//         self.change_state()
-//     }
-
-//     // fn from_art(mut self, a)
-// }
-
 // TODO: Add serialization
 #[derive(Clone, Copy)]
 pub enum InvitationKeys {
@@ -279,40 +142,76 @@ pub enum InvitationKeys {
     },
 }
 
-// message GroupInfo {
-//   string id = 1; // document id
-//   string name = 2; // document name
-//   google.protobuf.Timestamp created = 3; // document creation time
-//   bytes picture = 4;
-//   repeated User members = 10; // membership list of document
-// }
-
-// message User {
-//   string id = 1; // actor id
-//   string name = 2; // user name
-//   bytes public_key = 3; // user identity public key
-//   bytes picture = 4; // user picture
-//   Role role = 5; // user role
-// }
-
 pub struct GroupContext {
     art: PrivateART<CortadoAffine>,
     stk: Box<[u8; 32]>,
     epoch: u64,
-    group_id: String,
     proof_system: ProofSystem,
-
-    members: HashMap<String, zero_art_proto::User>,
 
     rng: StdRng,
 
     identity_key_pair: KeyPair,
     ephemeral_key_pair: KeyPair,
 
-    ready: bool,
+    this_id: String,
+    metadata: metadata::group::GroupInfo,
 }
 
 impl GroupContext {
+    pub fn new_with_seed(
+        identity_secret_key: ScalarField,
+        leaf_secret: ScalarField,
+        identified_keys: Vec<metadata::user::User>,
+        unidentified_members_count: usize,
+        name: String,
+        picture: Vec<u8>,
+        seed: [u8; 32]
+    ) {
+        let rng = StdRng::from_seed(seed);
+
+        let identity_public_key = (CortadoAffine::generator() * identity_secret_key).into_affine();
+
+        let mut identified_leaf_secrets: Vec<ScalarField> =
+            Vec::with_capacity(identified_keys.len());
+        let mut unidentified_leaf_secrets: Vec<ScalarField> =
+            Vec::with_capacity(unidentified_key_pairs.len());
+
+        for IdentifiedPublicKeys {
+            identity_public_key,
+            invitation_public_key,
+        } in identified_keys.iter()
+        {
+            let leaf_secret = ScalarField::from_le_bytes_mod_order(
+                &x3dh_a::<CortadoAffine>(
+                    identity_secret_key,
+                    eph_key_pair.secret_key,
+                    identity_public_key.clone(),
+                    invitation_public_key.clone(),
+                )
+                .unwrap(),
+            );
+
+            identified_leaf_secrets.push(leaf_secret);
+        }
+
+        for KeyPair { public_key, .. } in unidentified_key_pairs.iter() {
+            let leaf_secret = ScalarField::from_le_bytes_mod_order(
+                &x3dh_a::<CortadoAffine>(
+                    owner_key_pair.secret_key,
+                    eph_key_pair.secret_key,
+                    public_key.clone(),
+                    public_key.clone(),
+                )
+                .unwrap(),
+            );
+
+            unidentified_leaf_secrets.push(leaf_secret);
+        }
+
+        // println!("{:?}", identified_keys);
+        // Self { art: (), stk: (), epoch: () }
+    }
+
     // pub fn new(identity_public_key: KeyPair, ephemeral_public_key: Option<KeyPair>, invitation_keys: &[InvitationKeys]) -> Self {
 
     // }
@@ -338,7 +237,7 @@ impl GroupContext {
         let protected_payload = std::mem::take(&mut frame_tbs.protected_payload);
 
         // Validate that frame belong to this group
-        if frame_tbs.group_id != self.group_id {
+        if frame_tbs.group_id != self.metadata.id {
             return Err(SDKError::InvalidInput);
         }
 
@@ -366,15 +265,19 @@ impl GroupContext {
             let payload_tbs = payload.payload.ok_or(SDKError::InvalidInput)?;
             match payload_tbs.sender.ok_or(SDKError::InvalidInput)? {
                 protected_payload_tbs::Sender::UserId(id) => {
-                    let sender = self.members.get(&id).ok_or(SDKError::InvalidInput)?;
-                    let sender_public_key =
-                        CortadoAffine::deserialize_uncompressed(&sender.public_key[..])?;
+                    let sender = self
+                        .metadata
+                        .members
+                        .get(&id)
+                        .ok_or(SDKError::InvalidInput)?;
+                    // let sender_public_key =
+                    //     CortadoAffine::deserialize_uncompressed(&sender.public_key)?;
 
-                    schnorr::verify(
-                        &signature,
-                        &vec![sender_public_key],
-                        &payload_tbs.encode_to_vec(),
-                    )?;
+                    // schnorr::verify(
+                    //     &signature,
+                    //     &vec![sender_public_key],
+                    //     &payload_tbs.encode_to_vec(),
+                    // )?;
                 }
                 protected_payload_tbs::Sender::LeafId(_) => {}
             };
@@ -413,7 +316,7 @@ impl GroupContext {
         let member_leaf_secret = self.compute_member_leaf_secret(invitation_keys)?;
 
         // 2. Add node to ART and recompute STK
-        let (_, changes, artefacts) = self.art.append_node(&member_leaf_secret)?;
+        let (_, changes, artefacts) = self.art.append_or_replace_node(&member_leaf_secret)?;
         self.advance_epoch()?;
 
         // 3. Create frame without encrypted payload
@@ -422,7 +325,7 @@ impl GroupContext {
             .build();
         let mut frame_tbs = builders::FrameTbsBuilder::new()
             .epoch(self.epoch)
-            .group_id(self.group_id.clone())
+            .group_id(self.metadata.id.clone())
             .group_operation(group_operation)
             .build();
 
@@ -492,7 +395,7 @@ impl GroupContext {
             .build();
         let mut frame_tbs = builders::FrameTbsBuilder::new()
             .epoch(self.epoch)
-            .group_id(self.group_id.clone())
+            .group_id(self.metadata.id.clone())
             .group_operation(group_operation)
             .build();
 
@@ -521,6 +424,81 @@ impl GroupContext {
         Ok(frame.encode_to_vec())
     }
 
+    // create_frame should:
+    // 1. Parse provided payloads
+    // (?: here can be problem that linked to situation
+    // when somebody will use this library with custom
+    // payloads and will returned error because only
+    // repo proto payloads can be parsed)
+    // 2. Build and sign (with identity key) general payload
+    // 3. Build FrameTBS and encrypt general payload with FrameTBS as associated data
+    // 4. Build and sign (with tree key) frame
+    // Return Frame
+    // TODO: KeyUpdate when last frame not from us
+    pub fn create_frame(&mut self, payloads: &[&[u8]]) -> Result<zero_art_proto::Frame, SDKError> {
+        // 1. Parse provided payloads
+        let payloads: Vec<zero_art_proto::Payload> = payloads
+            .iter()
+            .map(|&payload| zero_art_proto::Payload::decode(payload))
+            .collect::<Result<Vec<zero_art_proto::Payload>, DecodeError>>()?;
+
+        // 2. Build and sign (with identity key) general payload
+        let timestamp = Utc::now();
+        let payload_tbs = builders::ProtectedPayloadTbsBuilder::new()
+            .payload(payloads)
+            .created(Timestamp {
+                seconds: timestamp.timestamp(),
+                nanos: timestamp.timestamp_subsec_nanos() as i32,
+            })
+            // TODO: Replace with seq_num
+            // ?: If this is global counter then there can be collisions
+            .seq_num(0)
+            .sender(zero_art_proto::protected_payload_tbs::Sender::UserId(
+                self.this_id.clone(),
+            ))
+            .build();
+
+        let signature = schnorr::sign(
+            &vec![self.identity_key_pair.secret_key],
+            &vec![self.identity_key_pair.public_key],
+            &Sha3_256::digest(payload_tbs.encode_to_vec()),
+        )?;
+
+        let payload = builders::ProtectedPayloadBuilder::new()
+            .payload(payload_tbs)
+            .signature(signature)
+            .build();
+
+        // 3. Build FrameTBS and encrypt general payload with FrameTBS as associated data
+        // ?: Maybe in the future nonce should increments
+        // sequentialy like in Ethereum transactions
+        let mut nonce = [0u8; 16];
+        self.rng.fill(&mut nonce);
+        let mut frame_tbs = builders::FrameTbsBuilder::new()
+            .epoch(self.epoch)
+            .group_id(self.metadata.id.clone())
+            .nonce(nonce.into())
+            .build();
+
+        let protected_payload =
+            self.encrypt(&payload.encode_to_vec(), &Sha3_256::digest(frame_tbs.encode_to_vec()))?;
+        frame_tbs.protected_payload = protected_payload;
+
+        // 4. Build and sign (with tree key) frame
+        let tk = self.art.recompute_root_key()?;
+        let proof = schnorr::sign(
+            &vec![tk.key],
+            &vec![(tk.generator * tk.key).into_affine()],
+            &Sha3_256::digest(frame_tbs.encode_to_vec()),
+        )?;
+
+        let frame = builders::FrameBuilder::new()
+            .frame(frame_tbs)
+            .proof(proof)
+            .build();
+        Ok(frame)
+    }
+
     // update_key should:
     // 1. Update own leaf with provided secret and recompute STK
     // 2. Create frame without encrypted payload
@@ -544,7 +522,7 @@ impl GroupContext {
             .build();
         let mut frame_tbs = builders::FrameTbsBuilder::new()
             .epoch(self.epoch)
-            .group_id(self.group_id.clone())
+            .group_id(self.metadata.id.clone())
             .group_operation(group_operation)
             .build();
 
@@ -577,7 +555,7 @@ impl GroupContext {
     fn create_invite(&self, invitation_keys: InvitationKeys) -> Result<Invite, SDKError> {
         let invite_data = builders::ProtectedInviteDataBuilder::new()
             .epoch(self.epoch)
-            .group_id(self.group_id.clone())
+            .group_id(self.metadata.id.clone())
             .build()
             .encode_to_vec();
         let protected_invite_data = self.encrypt(&invite_data, b"")?;
@@ -634,7 +612,7 @@ impl GroupContext {
         Ok(builders::InviteBuilder::new().invite(invite).build())
     }
 
-    pub fn create_frame() {}
+    // pub fn create_frame() {}
 
     fn apply_changes(&mut self, changes: &[u8]) -> Result<(), SDKError> {
         self.art
@@ -650,117 +628,6 @@ impl GroupContext {
         Ok(())
     }
 }
-
-// impl GroupContextBuilder<context_state::WithIdentity> {
-//     fn new_with_identity(identity_key_pair: KeyPair) -> Self {
-//         let mut this = Self::default();
-//         this.identity_key_pair = Some(identity_key_pair);
-//         this
-//     }
-// }
-
-// impl GroupContextBuilder<context_state::WithPrekey> {
-//     fn new_with_identity(identity_key_pair: KeyPair) -> Self {
-//         let mut this = Self::default();
-//         this.identity_key_pair = Some(identity_key_pair);
-//         this
-//     }
-
-//     fn with_prekey(mut self, prekey: KeyPair) -> GroupContextBuilder<context_state::WithPrekey> {
-//         self.prekey = Some(prekey);
-//         self.change_state()
-//     }
-// }
-
-pub struct ArtManager {
-    art: PrivateART<CortadoAffine>,
-    stk: Box<[u8; 32]>,
-    epoch: usize,
-}
-
-impl ArtManager {
-    pub fn new(
-        owner_key_pair: KeyPair,
-        eph_key_pair: KeyPair,
-        leaf_secret: ScalarField,
-        identified_keys: Vec<IdentifiedPublicKeys>,
-        unidentified_key_pairs: Vec<KeyPair>,
-    ) {
-        let mut identified_leaf_secrets: Vec<ScalarField> =
-            Vec::with_capacity(identified_keys.len());
-        let mut unidentified_leaf_secrets: Vec<ScalarField> =
-            Vec::with_capacity(unidentified_key_pairs.len());
-
-        for IdentifiedPublicKeys {
-            identity_public_key,
-            invitation_public_key,
-        } in identified_keys.iter()
-        {
-            let leaf_secret = ScalarField::from_le_bytes_mod_order(
-                &x3dh_a::<CortadoAffine>(
-                    owner_key_pair.secret_key,
-                    eph_key_pair.secret_key,
-                    identity_public_key.clone(),
-                    invitation_public_key.clone(),
-                )
-                .unwrap(),
-            );
-
-            identified_leaf_secrets.push(leaf_secret);
-        }
-
-        for KeyPair { public_key, .. } in unidentified_key_pairs.iter() {
-            let leaf_secret = ScalarField::from_le_bytes_mod_order(
-                &x3dh_a::<CortadoAffine>(
-                    owner_key_pair.secret_key,
-                    eph_key_pair.secret_key,
-                    public_key.clone(),
-                    public_key.clone(),
-                )
-                .unwrap(),
-            );
-
-            unidentified_leaf_secrets.push(leaf_secret);
-        }
-
-        // println!("{:?}", identified_keys);
-        // Self { art: (), stk: (), epoch: () }
-    }
-
-    fn process_frame(&mut self, frame: zero_art_proto::Frame) -> Result<(), SDKError> {
-        if frame.frame.is_none() {
-            // return error
-            return Ok(());
-        }
-
-        // TODO: proof
-
-        let frame = frame.frame.unwrap();
-
-        if frame.group_operation.is_some() {
-            let grp_operation = frame.group_operation.unwrap();
-
-            let operation = grp_operation.operation.unwrap();
-
-            // match operation {
-            //     Operation::Init(_) => {}
-            //     Operation::AddMember(changes) => self.apply_changes(&changes)?,
-            //     Operation::RemoveMember(changes) => self.apply_changes(&changes)?,
-            //     Operation::KeyUpdate(changes) => self.apply_changes(&changes)?,
-            //     Operation::DropGroup(_) => self.apply_changes(&changes)?,
-            // }
-        }
-
-        Ok(())
-    }
-
-    fn encrypt() {}
-    fn decrypt() {}
-}
-
-// impl ArtManager {
-//     fn from_
-// }
 
 #[cfg(test)]
 mod tests {
