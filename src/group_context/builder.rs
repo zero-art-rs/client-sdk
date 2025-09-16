@@ -3,16 +3,25 @@ use std::collections::HashMap;
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::{PrimeField, UniformRand};
 use ark_std::rand::{SeedableRng, rngs::StdRng, thread_rng};
-use art::types::PrivateART;
+use art::types::{PrivateART, PublicART};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
-use crypto::x3dh::x3dh_a;
+use crypto::{
+    schnorr,
+    x3dh::{x3dh_a, x3dh_b},
+};
+use prost::Message;
+use sha3::{Digest, Sha3_256};
 
 use crate::{
-    group_context::{GroupContext, InvitationKeys, KeyPair, SDKError, utils},
-    metadata, proof_system, zero_art_proto,
+    group_context::{
+        GroupContext, InvitationKeys, KeyPair, SDKError,
+        utils::{self, decrypt},
+    },
+    metadata::{self, group},
+    proof_system, zero_art_proto,
 };
 
-use ark_serialize::{CanonicalSerialize, serialize_to_vec};
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, serialize_to_vec};
 
 pub struct GroupContextBuilder;
 
@@ -110,13 +119,27 @@ impl InitialGroupContextBuilder {
         leaf_secret: ScalarField,
         invite: zero_art_proto::Invite,
         user: metadata::user::User,
-    ) -> FromInviteGroupContextBuilder {
-        FromInviteGroupContextBuilder {
+    ) -> Result<FromInviteGroupContextBuilder, SDKError> {
+        if invite.invite.is_none() {
+            return Err(SDKError::InvalidInput);
+        }
+
+        let invite_tbs = invite.invite.clone().ok_or(SDKError::InvalidInput)?;
+        let inviter_public_key =
+            CortadoAffine::deserialize_uncompressed(&invite_tbs.identity_public_key[..])?;
+        schnorr::verify(
+            &invite.signature,
+            &vec![inviter_public_key],
+            &invite_tbs.encode_to_vec(),
+        )?;
+
+        Ok(FromInviteGroupContextBuilder {
             init: self,
             leaf_secret,
             invite,
             user,
-        }
+            spk_secret_key: None,
+        })
     }
 }
 
@@ -141,9 +164,11 @@ impl CreateGroupContextBuilder {
 
     pub fn push_identified_member_keys(
         &mut self,
-        identified_member_keys: (CortadoAffine, Option<CortadoAffine>),
+        identity_public_key: CortadoAffine,
+        spk_public_key: Option<CortadoAffine>,
     ) {
-        self.identified_members_keys.push(identified_member_keys);
+        self.identified_members_keys
+            .push((identity_public_key, spk_public_key));
     }
 
     pub fn payloads(mut self, payloads: Vec<zero_art_proto::Payload>) -> Self {
@@ -326,6 +351,127 @@ pub struct FromInviteGroupContextBuilder {
     leaf_secret: ScalarField,
     user: metadata::user::User,
     invite: zero_art_proto::Invite,
+    spk_secret_key: Option<ScalarField>,
 }
 
-pub fn secret_from_identified_invite(invite: zero_art_proto::invite::Invite) {}
+impl FromInviteGroupContextBuilder {
+    pub fn spk_secret_key(mut self, spk_secret_key: ScalarField) -> Self {
+        self.spk_secret_key = Some(spk_secret_key);
+        self
+    }
+
+    fn compute_invite_leaf_secret(&mut self) -> Result<ScalarField, SDKError> {
+        let invite_tbs = self.invite.clone().invite.ok_or(SDKError::InvalidInput)?;
+        let inviter_public_key =
+            CortadoAffine::deserialize_uncompressed(&invite_tbs.identity_public_key[..])?;
+        let ephemeral_public_key =
+            CortadoAffine::deserialize_uncompressed(&invite_tbs.ephemeral_public_key[..])?;
+
+        let invite_leaf_secret = match invite_tbs.invite.ok_or(SDKError::InvalidInput)? {
+            zero_art_proto::invite_tbs::Invite::IdentifiedInvite(_) => {
+                let spk_secret_key = self.spk_secret_key.unwrap_or(self.init.identity_secret_key);
+                // TODO: Verify spk
+                ScalarField::from_le_bytes_mod_order(&x3dh_b::<CortadoAffine>(
+                    self.init.identity_secret_key,
+                    spk_secret_key,
+                    inviter_public_key,
+                    ephemeral_public_key,
+                )?)
+            }
+            zero_art_proto::invite_tbs::Invite::UnidentifiedInvite(inv) => {
+                let temporary_secret_key =
+                    ScalarField::deserialize_uncompressed(&inv.private_key[..])?;
+
+                ScalarField::from_le_bytes_mod_order(&x3dh_b::<CortadoAffine>(
+                    temporary_secret_key,
+                    temporary_secret_key,
+                    inviter_public_key,
+                    ephemeral_public_key,
+                )?)
+            }
+        };
+
+        Ok(invite_leaf_secret)
+    }
+
+    pub fn create_signature(&self) {
+        // sign challenge for SP to get art
+    }
+
+    pub fn build(
+        mut self,
+        art: PublicART<CortadoAffine>,
+        invite_frame: zero_art_proto::Frame,
+    ) -> Result<(), SDKError> {
+        // 1. Init PRNGs
+        let mut context_rng = if self.init.context_prng_seed.is_none() {
+            StdRng::from_rng(thread_rng()).unwrap()
+        } else {
+            StdRng::from_seed(self.init.context_prng_seed.unwrap())
+        };
+
+        let proof_system = if self.init.proof_system_prng_seed.is_none() {
+            proof_system::ProofSystem::default()
+        } else {
+            proof_system::ProofSystem::new(self.init.proof_system_prng_seed.unwrap())
+        };
+
+        let inviter_leaf_secret = self.compute_invite_leaf_secret()?;
+
+        let mut inviter_leaf_secret_bytes = Vec::new();
+        inviter_leaf_secret.serialize_uncompressed(&mut inviter_leaf_secret_bytes)?;
+
+        let invite_tbs = self.invite.clone().invite.ok_or(SDKError::InvalidInput)?;
+
+        let protected_invite_data = decrypt(
+            &inviter_leaf_secret_bytes.try_into().unwrap(),
+            &invite_tbs.protected_invite_data,
+            &[],
+        )?;
+
+        let protected_invite_data =
+            zero_art_proto::ProtectedInviteData::decode(&protected_invite_data[..])?;
+
+        let stage_key: [u8; 32] = protected_invite_data.stage_key.try_into().unwrap();
+
+        let art = PrivateART::from_public_art(art, inviter_leaf_secret)?;
+
+        let mut invite_frame_tbs = invite_frame.frame.ok_or(SDKError::InvalidInput)?;
+        let invite_frame_protected_payload =
+            std::mem::take(&mut invite_frame_tbs.protected_payload);
+
+        let invite_frame_protected_payload = decrypt(
+            &stage_key,
+            &invite_frame_protected_payload,
+            &Sha3_256::digest(invite_frame_tbs.encode_to_vec()),
+        )?;
+        let invite_frame_protected_payload =
+            zero_art_proto::ProtectedPayload::decode(&invite_frame_protected_payload[..])?;
+        let invite_frame_protected_payload_tbs = invite_frame_protected_payload
+            .payload
+            .ok_or(SDKError::InvalidInput)?;
+        let group_action = invite_frame_protected_payload_tbs
+            .group_action
+            .ok_or(SDKError::InvalidInput)?;
+        let group_info = match group_action.action.ok_or(SDKError::InvalidInput)? {
+            zero_art_proto::group_action_payload::Action::InviteMember(group_info) => {
+                metadata::group::GroupInfo::from_proto(&group_info)
+            }
+            _ => return Err(SDKError::InvalidInput),
+        };
+
+        let group_context = GroupContext {
+            art,
+            epoch: protected_invite_data.epoch,
+            stk: Box::new(stage_key),
+            rng: context_rng,
+            proof_system,
+            identity_key_pair: KeyPair::from_secret_key(self.init.identity_secret_key),
+            this_id: self.user.id(),
+            metadata: group_info,
+        };
+
+        // group_context.update_key(self.leaf_secret, payload);
+        Ok(())
+    }
+}

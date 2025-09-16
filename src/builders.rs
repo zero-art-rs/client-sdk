@@ -1,9 +1,9 @@
 use prost_types::Timestamp;
 
 use crate::zero_art_proto::{
-    Frame, FrameTbs, GroupOperation, IdentifiedInvite, Invite, Payload, ProtectedInviteData,
-    ProtectedPayload, ProtectedPayloadTbs, UnidentifiedInvite, group_operation::Operation, invite,
-    protected_payload_tbs::Sender,
+    Frame, FrameTbs, GroupOperation, IdentifiedInvite, Invite, InviteTbs, Payload,
+    ProtectedInviteData, ProtectedPayload, ProtectedPayloadTbs, UnidentifiedInvite,
+    group_operation::Operation, invite_tbs, protected_payload_tbs::Sender,
 };
 
 #[derive(Default)]
@@ -95,18 +95,8 @@ impl IdentifiedInviteBuilder {
         self
     }
 
-    pub fn ephemeral_public_key(mut self, ephemeral_public_key: Vec<u8>) -> Self {
-        self.0.ephemeral_public_key = ephemeral_public_key;
-        self
-    }
-
     pub fn spk_public_key(mut self, spk_public_key: Vec<u8>) -> Self {
         self.0.spk_public_key = spk_public_key;
-        self
-    }
-
-    pub fn protected_invite_data(mut self, protected_invite_data: Vec<u8>) -> Self {
-        self.0.protected_invite_data = protected_invite_data;
         self
     }
 
@@ -122,6 +112,33 @@ impl UnidentifiedInviteBuilder {
         Self::default()
     }
 
+    pub fn private_key(mut self, private_key: Vec<u8>) -> Self {
+        self.0.private_key = private_key;
+        self
+    }
+
+    pub fn build(self) -> UnidentifiedInvite {
+        self.0
+    }
+}
+
+#[derive(Default)]
+pub struct InviteTbsBuilder(InviteTbs);
+impl InviteTbsBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn invite(mut self, invite: invite_tbs::Invite) -> Self {
+        self.0.invite = Some(invite);
+        self
+    }
+
+    pub fn protected_invite_data(mut self, protected_invite_data: Vec<u8>) -> Self {
+        self.0.protected_invite_data = protected_invite_data;
+        self
+    }
+
     pub fn identity_public_key(mut self, identity_public_key: Vec<u8>) -> Self {
         self.0.identity_public_key = identity_public_key;
         self
@@ -132,17 +149,7 @@ impl UnidentifiedInviteBuilder {
         self
     }
 
-    pub fn private_key(mut self, private_key: Vec<u8>) -> Self {
-        self.0.private_key = private_key;
-        self
-    }
-
-    pub fn protected_invite_data(mut self, protected_invite_data: Vec<u8>) -> Self {
-        self.0.protected_invite_data = protected_invite_data;
-        self
-    }
-
-    pub fn build(self) -> UnidentifiedInvite {
+    pub fn build(self) -> InviteTbs {
         self.0
     }
 }
@@ -154,7 +161,7 @@ impl InviteBuilder {
         Self::default()
     }
 
-    pub fn invite(mut self, invite: invite::Invite) -> Self {
+    pub fn invite(mut self, invite: InviteTbs) -> Self {
         self.0.invite = Some(invite);
         self
     }
@@ -184,6 +191,11 @@ impl ProtectedInviteDataBuilder {
 
     pub fn epoch(mut self, epoch: u64) -> Self {
         self.0.epoch = epoch;
+        self
+    }
+
+    pub fn stage_key(mut self, stage_key: Vec<u8>) -> Self {
+        self.0.stage_key = stage_key;
         self
     }
 
