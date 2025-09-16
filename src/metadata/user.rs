@@ -3,12 +3,11 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use cortado::CortadoAffine;
 use prost::Message;
 
+#[derive(Debug, Clone)]
 pub struct User {
     id: String,
     name: String,
     pub public_key: CortadoAffine,
-    // Used only for group creation
-    spk: Option<CortadoAffine>,
     picture: Vec<u8>,
     // ?: Should we create separate enum?
     role: zero_art_proto::Role,
@@ -17,12 +16,11 @@ pub struct User {
 // TODO: Replace .unwrap() with errors
 // TODO: Add TryFrom/From trait impls
 impl User {
-    pub fn new(name: String, picture: Vec<u8>, public_key: CortadoAffine, spk: Option<CortadoAffine>) -> Self {
+    pub fn new(name: String, picture: Vec<u8>, public_key: CortadoAffine) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             name,
             public_key,
-            spk,
             picture,
             role: zero_art_proto::Role::Write,
         }
@@ -66,7 +64,6 @@ impl User {
             public_key,
             picture: user.picture.clone(),
             role,
-            spk: None
         }
     }
 

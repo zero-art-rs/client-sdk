@@ -8,13 +8,41 @@ use crate::{
     zero_art_proto,
 };
 
+#[derive(Default)]
+pub struct GroupInfoBuilder(GroupInfo);
+
+impl GroupInfoBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn id(mut self, id: String) -> Self {
+        self.0.id = id;
+        self
+    }
+
+    pub fn name(mut self, name: String) -> Self {
+        self.0.name = name;
+        self
+    }
+
+    pub fn picture(mut self, picture: Vec<u8>) -> Self {
+        self.0.picture = picture;
+        self
+    }
+
+    pub fn build(self) -> GroupInfo {
+        self.0
+    }
+}
+
+#[derive(Default, Clone)]
 pub struct GroupInfo {
     pub id: String,
     pub name: String,
     pub created: DateTime<Utc>,
     pub picture: Vec<u8>,
     pub members: IndexMap<String, user::User>,
-    pub owner_id: String,
 }
 
 // TODO: Replace .unwrap() with errors
@@ -56,7 +84,7 @@ impl GroupInfo {
             })
             .collect();
 
-        let owner_id = members.get_index(0).unwrap().1.id().clone();
+        // let owner_id = members.get_index(0).unwrap().1.id().clone();
 
         Self {
             id: group.id.clone(),
@@ -64,7 +92,6 @@ impl GroupInfo {
             created,
             picture: group.picture.clone(),
             members,
-            owner_id,
         }
     }
 
