@@ -60,7 +60,7 @@ impl GroupContext {
     ///
     /// Should be carefully used, because you can't move backward
     pub(super) fn advance_epoch(&mut self) -> Result<(), SDKError> {
-        let tk = self.art.recompute_root_key()?;
+        let tk = self.art.get_root_key()?;
 
         // Recompute stk: stk(i+1) = HKDF( "stage-key-derivation", stk(i) || tk(i+1) )
         let stk = hkdf(

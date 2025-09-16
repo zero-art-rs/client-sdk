@@ -212,7 +212,7 @@ impl GroupContext {
             if let Some(branch_changes) = branch_changes {
                 let mut art_clone = self.art.clone();
                 art_clone.update_private_art(&branch_changes);
-                let tree_key = art_clone.recompute_root_key()?;
+                let tree_key = art_clone.get_root_key()?;
                 let stage_key = derive_stage_key(&self.stk, tree_key.key)?;
                 (stage_key, Some(branch_changes))
             } else {
@@ -396,7 +396,7 @@ impl GroupContext {
             ScalarField::rand(&mut self.rng);
 
         // 2. Make node blank in ART and recompute STK
-        let (_, changes, artefacts) = self.art.make_blank(&public_key, &temporary_leaf_secret)?;
+        let (_, changes, artefacts) = self.art.make_blank(&self.art.get_path_to_leaf(&public_key).unwrap(), &temporary_leaf_secret)?;
         self.advance_epoch()?;
 
         // 3. Create frame without encrypted payload
@@ -496,7 +496,7 @@ impl GroupContext {
         frame_tbs.protected_payload = protected_payload;
 
         // 4. Build and sign (with tree key) frame
-        let tk = self.art.recompute_root_key()?;
+        let tk = self.art.get_root_key()?;
         let proof = schnorr::sign(
             &vec![tk.key],
             &vec![(tk.generator * tk.key).into_affine()],
@@ -638,7 +638,7 @@ impl GroupContext {
     fn apply_changes(&mut self, changes: &[u8]) -> Result<(), SDKError> {
         self.art
             .update_private_art(&BranchChanges::deserialize(changes)?)?;
-        let tk = self.art.recompute_root_key()?;
+        let tk = self.art.get_root_key()?;
 
         // Derive new stage key
         // TODO: Concat with stk

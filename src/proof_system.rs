@@ -24,13 +24,13 @@ impl Default for ProofSystem {
         let g_1 = CortadoAffine::generator();
         let h_1 = CortadoAffine::new_unchecked(cortado::ALT_GENERATOR_X, cortado::ALT_GENERATOR_Y);
 
-        let gens = PedersenGens::default();
-        let basis = PedersenBasis::<CortadoAffine, Ed25519Affine>::new(
-            g_1,
-            h_1,
-            ristretto255_to_ark(gens.B).unwrap(),
-            ristretto255_to_ark(gens.B_blinding).unwrap(),
-        );
+    let gens = PedersenGens::default();
+    let basis = PedersenBasis::<CortadoAffine, Ed25519Affine>::new(
+        g_1,
+        h_1,
+        ristretto255_to_ark(gens.B).unwrap(),
+        ristretto255_to_ark(gens.B_blinding).unwrap(),
+    );
 
         let rng = StdRng::from_rng(thread_rng()).expect("Can't create rng from thread_rng");
 
