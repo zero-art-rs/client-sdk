@@ -322,7 +322,7 @@ impl CreateGroupContextBuilder {
 
         let mut payloads = self.payloads;
         payloads.push(init_payload_bytes);
-        let mut frame = group_context.create_frame_unproved(payloads)?;
+        let mut frame = group_context.create_init_frame_unproved(payloads)?;
 
         // 4. Build and sign (with identity key) frame
         let proof = schnorr::sign(
