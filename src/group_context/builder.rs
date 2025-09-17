@@ -92,23 +92,14 @@ impl InitialGroupContextBuilder {
 
         let identity_key_pair = KeyPair::from_secret_key(self.identity_secret_key);
 
-        let this_id = group_info
-            .members
-            .iter()
-            .filter(|(_, user)| user.public_key == identity_key_pair.public_key)
-            .take(1)
-            .map(|(id, _)| id.clone())
-            .collect();
-
         Ok(GroupContext {
             art,
             stk: Box::new(stk),
             identity_key_pair,
             epoch,
-            metadata: group_info,
+            group_info,
             proof_system,
             rng: context_rng,
-            this_id,
         })
     }
 
@@ -281,7 +272,7 @@ impl CreateGroupContextBuilder {
         let mut user = self.user;
         let mut group_info = self.group_info;
         user.public_key = identity_public_key;
-        group_info.members.insert(user.id(), user.clone());
+        group_info.members.add_user(user);
 
         // 9. Build group context
         let mut group_context = GroupContext {
@@ -291,8 +282,7 @@ impl CreateGroupContextBuilder {
             rng: context_rng,
             proof_system,
             identity_key_pair: KeyPair::from_secret_key(identity_secret_key),
-            this_id: user.id(),
-            metadata: group_info.clone(),
+            group_info: group_info.clone(),
         };
 
         // 9. Create invitations
@@ -324,7 +314,7 @@ impl CreateGroupContextBuilder {
             content: Some(zero_art_proto::payload::Content::Action(
                 zero_art_proto::GroupActionPayload {
                     action: Some(zero_art_proto::group_action_payload::Action::Init(
-                        group_info.to_proto(),
+                        group_info.into(),
                     )),
                 },
             )),

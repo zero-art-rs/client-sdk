@@ -1,38 +1,65 @@
-use indexmap::IndexMap;
-
-use chrono::{DateTime, Utc};
-use prost::Message;
-
 use crate::{
-    metadata::user::{self, User},
+    metadata::{error::Error, user::User},
     zero_art_proto,
 };
+use chrono::{DateTime, Utc};
+use cortado::CortadoAffine;
+use std::collections::HashMap;
 
-#[derive(Default)]
-pub struct GroupInfoBuilder(GroupInfo);
+#[derive(Debug, Default, Clone)]
+pub struct GroupMembers {
+    by_id: HashMap<String, User>,
+    by_public_key: HashMap<CortadoAffine, String>,
+}
 
-impl GroupInfoBuilder {
-    pub fn new() -> Self {
-        Self::default()
+impl GroupMembers {
+    pub fn add_user(&mut self, user: User) {
+        let id = user.id.clone();
+        let key = user.public_key;
+        self.by_public_key.insert(key, id.clone());
+        self.by_id.insert(id, user);
     }
 
-    pub fn id(mut self, id: String) -> Self {
-        self.0.id = id;
-        self
+    pub fn get_by_id(&self, id: &str) -> Option<&User> {
+        self.by_id.get(id)
     }
 
-    pub fn name(mut self, name: String) -> Self {
-        self.0.name = name;
-        self
+    pub fn get_by_public_key(&self, public_key: &CortadoAffine) -> Option<&User> {
+        self.by_public_key
+            .get(public_key)
+            .and_then(|id| self.by_id.get(id))
     }
 
-    pub fn picture(mut self, picture: Vec<u8>) -> Self {
-        self.0.picture = picture;
-        self
+    pub fn iter(&self) -> impl Iterator<Item = &User> {
+        self.by_id.values()
     }
 
-    pub fn build(self) -> GroupInfo {
-        self.0
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut User> {
+        self.by_id.values_mut()
+    }
+
+    pub fn iter_with_ids(&self) -> impl Iterator<Item = (&String, &User)> {
+        self.by_id.iter()
+    }
+}
+
+impl TryFrom<Vec<zero_art_proto::User>> for GroupMembers {
+    type Error = Error;
+    fn try_from(value: Vec<zero_art_proto::User>) -> Result<Self, Self::Error> {
+        let mut members = GroupMembers::default();
+
+        for proto_user in value {
+            let user: User = proto_user.try_into()?;
+            members.add_user(user);
+        }
+
+        Ok(members)
+    }
+}
+
+impl From<GroupMembers> for Vec<zero_art_proto::User> {
+    fn from(value: GroupMembers) -> Self {
+        value.by_id.into_values().map(|user| user.into()).collect()
     }
 }
 
@@ -41,65 +68,40 @@ pub struct GroupInfo {
     pub id: String,
     pub name: String,
     pub created: DateTime<Utc>,
-    pub picture: Vec<u8>,
-    pub members: IndexMap<String, user::User>,
+    pub metadata: Vec<u8>,
+    pub members: GroupMembers,
 }
 
-// TODO: Replace .unwrap() with errors
-// TODO: Add TryFrom/From trait impls
-impl GroupInfo {
-    // pub fn serialize() {
+impl TryFrom<zero_art_proto::GroupInfo> for GroupInfo {
+    type Error = Error;
 
-    // }
-
-    // pub fn deserialize() {
-
-    // }
-
-    pub fn to_proto(&self) -> zero_art_proto::GroupInfo {
-        zero_art_proto::GroupInfo {
-            id: self.id.clone(),
-            name: self.name.clone(),
-            created: Some(prost_types::Timestamp {
-                seconds: self.created.timestamp(),
-                nanos: self.created.timestamp_subsec_nanos() as i32,
-            }),
-            picture: self.picture.clone(),
-            members: self.members.values().map(|x| x.to_proto()).collect(),
-        }
-    }
-
-    pub fn from_proto(group: &zero_art_proto::GroupInfo) -> Self {
-        let timestamp_proto = group.created.unwrap_or_default();
+    fn try_from(value: zero_art_proto::GroupInfo) -> Result<Self, Self::Error> {
+        let timestamp_proto = value.created.ok_or(Error::RequiredFieldAbsent)?;
         let created =
             DateTime::from_timestamp(timestamp_proto.seconds, timestamp_proto.nanos as u32)
-                .unwrap_or_default();
+                .ok_or(Error::RequiredFieldAbsent)?;
 
-        let members: IndexMap<String, User> = group
-            .members
-            .iter()
-            .map(|u| {
-                let member = User::from_proto(u);
-                (member.id(), member)
-            })
-            .collect();
-
-        // let owner_id = members.get_index(0).unwrap().1.id().clone();
-
-        Self {
-            id: group.id.clone(),
-            name: group.name.clone(),
+        Ok(Self {
+            id: value.id,
+            name: value.name,
             created,
-            picture: group.picture.clone(),
-            members,
+            metadata: value.picture,
+            members: value.members.try_into()?,
+        })
+    }
+}
+
+impl From<GroupInfo> for zero_art_proto::GroupInfo {
+    fn from(value: GroupInfo) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+            created: Some(prost_types::Timestamp {
+                seconds: value.created.timestamp(),
+                nanos: value.created.timestamp_subsec_nanos() as i32,
+            }),
+            picture: value.metadata,
+            members: value.members.into(),
         }
-    }
-
-    pub fn to_proto_bytes(&self) -> Vec<u8> {
-        self.to_proto().encode_to_vec()
-    }
-
-    pub fn from_proto_bytes(proto: &[u8]) -> Self {
-        Self::from_proto(&zero_art_proto::GroupInfo::decode(proto).unwrap())
     }
 }

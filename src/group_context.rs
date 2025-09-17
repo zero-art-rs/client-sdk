@@ -64,6 +64,8 @@ pub enum SDKError {
     HKDFError(#[from] hkdf::InvalidLength),
     #[error("R1CS error")]
     R1CSError(#[from] R1CSError),
+    #[error("Metadata error")]
+    MetadataError(#[from] metadata::error::Error),
 
     #[error("AES encryption error")]
     AesError,
@@ -161,21 +163,36 @@ pub struct GroupContext {
 
     identity_key_pair: KeyPair,
 
-    this_id: String,
-    metadata: metadata::group::GroupInfo,
+    group_info: metadata::group::GroupInfo,
 }
 
 impl GroupContext {
     pub fn into_parts(self) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, u64, Vec<u8>), SDKError> {
+        let group_info: zero_art_proto::GroupInfo = self.group_info.into();
+
         let mut leaf_secret = Vec::new();
-        self.art.secret_key.serialize_uncompressed(&mut leaf_secret)?;
+        self.art
+            .secret_key
+            .serialize_uncompressed(&mut leaf_secret)?;
         let art = self.art.serialize()?;
         let stk = self.stk.to_vec();
-        let metadata = self.metadata.to_proto_bytes();
-        Ok((leaf_secret, art, stk, self.epoch, metadata))
+        Ok((
+            leaf_secret,
+            art,
+            stk,
+            self.epoch,
+            group_info.encode_to_vec(),
+        ))
     }
 
-    pub fn from_parts(identity_secret_key: ScalarField, leaf_secret: ScalarField, art: &[u8], stk: [u8; 32], epoch: u64, group_info: metadata::group::GroupInfo) -> Result<Self, SDKError> {
+    pub fn from_parts(
+        identity_secret_key: ScalarField,
+        leaf_secret: ScalarField,
+        art: &[u8],
+        stk: [u8; 32],
+        epoch: u64,
+        group_info: metadata::group::GroupInfo,
+    ) -> Result<Self, SDKError> {
         let art: PrivateART<CortadoAffine> = PrivateART::deserialize(art, &leaf_secret)?;
 
         // 1. Init PRNGs
@@ -185,23 +202,14 @@ impl GroupContext {
 
         let identity_key_pair = KeyPair::from_secret_key(identity_secret_key);
 
-        let this_id = group_info
-            .members
-            .iter()
-            .filter(|(_, user)| user.public_key == identity_key_pair.public_key)
-            .take(1)
-            .map(|(id, _)| id.clone())
-            .collect();
-
         Ok(GroupContext {
             art,
             stk: Box::new(stk),
             identity_key_pair,
             epoch,
-            metadata: group_info,
+            group_info,
             proof_system,
             rng: context_rng,
-            this_id,
         })
     }
 
@@ -228,7 +236,7 @@ impl GroupContext {
 
         // Validate that frame belong to this group
         let group_id = frame_tbs.group_id;
-        if group_id != self.metadata.id {
+        if group_id != self.group_info.id {
             return Err(SDKError::InvalidInput);
         }
 
@@ -271,9 +279,9 @@ impl GroupContext {
 
         let sender = match protected_payload_tbs.sender.ok_or(SDKError::InvalidInput)? {
             protected_payload_tbs::Sender::UserId(id) => self
-                .metadata
+                .group_info
                 .members
-                .get(&id)
+                .get_by_id(&id)
                 .ok_or(SDKError::InvalidInput)?,
             protected_payload_tbs::Sender::LeafId(_) => return Err(SDKError::InvalidInput),
         };
@@ -335,7 +343,7 @@ impl GroupContext {
             content: Some(zero_art_proto::payload::Content::Action(
                 zero_art_proto::GroupActionPayload {
                     action: Some(zero_art_proto::group_action_payload::Action::InviteMember(
-                        self.metadata.to_proto(),
+                        self.group_info.clone().into(),
                     )),
                 },
             )),
@@ -354,7 +362,12 @@ impl GroupContext {
             // ?: If this is global counter then there can be collisions
             .seq_num(0)
             .sender(zero_art_proto::protected_payload_tbs::Sender::UserId(
-                self.this_id.clone(),
+                self.group_info
+                    .members
+                    .get_by_public_key(&self.identity_key_pair.public_key)
+                    .ok_or(SDKError::InvalidInput)?
+                    .id
+                    .clone(),
             ))
             .build();
 
@@ -371,7 +384,7 @@ impl GroupContext {
 
         let mut frame_tbs = builders::FrameTbsBuilder::new()
             .epoch(self.epoch)
-            .group_id(self.metadata.id.clone())
+            .group_id(self.group_info.id.clone())
             .group_operation(group_operation)
             .build();
 
@@ -446,7 +459,7 @@ impl GroupContext {
             .build();
         let mut frame_tbs = builders::FrameTbsBuilder::new()
             .epoch(self.epoch)
-            .group_id(self.metadata.id.clone())
+            .group_id(self.group_info.id.clone())
             .group_operation(group_operation)
             .build();
 
@@ -503,9 +516,11 @@ impl GroupContext {
             // TODO: Replace with seq_num
             // ?: If this is global counter then there can be collisions
             .seq_num(0)
-            .sender(zero_art_proto::protected_payload_tbs::Sender::UserId(
-                self.this_id.clone(),
-            ))
+            .sender(zero_art_proto::protected_payload_tbs::Sender::UserId(self
+                .group_info
+                .members
+                .get_by_public_key(&self.identity_key_pair.public_key)
+                .ok_or(SDKError::InvalidInput)?.id.clone()))
             .build();
 
         let signature = schnorr::sign(
@@ -526,7 +541,7 @@ impl GroupContext {
         self.rng.fill(&mut nonce);
         let mut frame_tbs = builders::FrameTbsBuilder::new()
             .epoch(self.epoch)
-            .group_id(self.metadata.id.clone())
+            .group_id(self.group_info.id.clone())
             .nonce(nonce.into())
             .build();
 
@@ -575,7 +590,7 @@ impl GroupContext {
 
         let mut frame_tbs = builders::FrameTbsBuilder::new()
             .epoch(self.epoch)
-            .group_id(self.metadata.id.clone())
+            .group_id(self.group_info.id.clone())
             .group_operation(group_operation)
             .build();
 
@@ -612,7 +627,7 @@ impl GroupContext {
     ) -> Result<Invite, SDKError> {
         let invite_data = builders::ProtectedInviteDataBuilder::new()
             .epoch(self.epoch)
-            .group_id(self.metadata.id.clone())
+            .group_id(self.group_info.id.clone())
             .stage_key(self.stk.to_vec())
             .build()
             .encode_to_vec();
@@ -713,11 +728,21 @@ mod tests {
             secrets_factory.generate_secret_with_public_key();
         let leaf_secret = secrets_factory.generate_secret();
 
-        let user = metadata::user::User::new("id1".to_string(), "user1".to_string(), vec![], identity_public_key);
-        let group_info = metadata::group::GroupInfoBuilder::new()
-            .id(uuid::Uuid::new_v4().to_string())
-            .name("group1".to_string())
-            .build();
+        let user = metadata::user::User {
+            id: String::from("id"),
+            name: String::from("id"),
+            metadata: vec![],
+            public_key: identity_public_key,
+            role: zero_art_proto::Role::default()
+        };
+
+        let group_info = metadata::group::GroupInfo {
+            id: String::from("id"),
+            name: String::from("id"),
+            metadata: vec![],
+            created: Utc::now(),
+            members: metadata::group::GroupMembers::default(),
+        };
 
         let (identified_public_key_1, identified_secret_key_1) =
             secrets_factory.generate_secret_with_public_key();

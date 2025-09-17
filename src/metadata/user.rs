@@ -1,77 +1,48 @@
-use crate::zero_art_proto;
+use crate::{metadata::error::Error, zero_art_proto};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use cortado::CortadoAffine;
-use prost::Message;
 
 #[derive(Debug, Clone)]
 pub struct User {
-    id: String,
-    name: String,
+    pub id: String,
+    pub name: String,
     pub public_key: CortadoAffine,
-    picture: Vec<u8>,
+    pub metadata: Vec<u8>,
     // ?: Should we create separate enum?
-    role: zero_art_proto::Role,
+    pub role: zero_art_proto::Role,
 }
 
-// TODO: Replace .unwrap() with errors
-// TODO: Add TryFrom/From trait impls
-impl User {
-    pub fn new(id: String, name: String, picture: Vec<u8>, public_key: CortadoAffine) -> Self {
-        Self {
-            id: id,
-            name,
+impl TryFrom<zero_art_proto::User> for User {
+    type Error = Error;
+
+    fn try_from(value: zero_art_proto::User) -> Result<Self, Self::Error> {
+        let public_key = CortadoAffine::deserialize_uncompressed(&value.public_key[..])?;
+        let role = zero_art_proto::Role::try_from(value.role)?;
+
+        Ok(Self {
+            id: value.id,
+            name: value.name,
             public_key,
-            picture,
-            role: zero_art_proto::Role::Write,
-        }
+            metadata: value.picture,
+            role,
+        })
     }
+}
 
-    // TODO: Rewrite this
-    pub fn id(&self) -> String {
-        self.id.clone()
-    }
-
-    // pub fn serialize() {
-
-    // }
-
-    // pub fn deserialize() {
-
-    // }
-
-    pub fn to_proto(&self) -> zero_art_proto::User {
+impl From<User> for zero_art_proto::User {
+    fn from(value: User) -> Self {
         let mut public_key_bytes = Vec::new();
-        self.public_key
+        value
+            .public_key
             .serialize_uncompressed(&mut public_key_bytes)
             .unwrap();
 
-        zero_art_proto::User {
-            id: self.id.clone(),
-            name: self.name.clone(),
-            public_key: public_key_bytes,
-            picture: self.picture.clone(),
-            role: self.role as i32,
-        }
-    }
-
-    pub fn from_proto(user: &zero_art_proto::User) -> Self {
-        let public_key = CortadoAffine::deserialize_uncompressed(&user.public_key[..]).unwrap();
-        let role = zero_art_proto::Role::try_from(user.role).unwrap();
-
         Self {
-            id: user.id.clone(),
-            name: user.name.clone(),
-            public_key,
-            picture: user.picture.clone(),
-            role,
+            id: value.id,
+            name: value.name,
+            public_key: public_key_bytes,
+            picture: value.metadata,
+            role: value.role as i32,
         }
-    }
-
-    pub fn to_proto_bytes(&self) -> Vec<u8> {
-        self.to_proto().encode_to_vec()
-    }
-
-    pub fn from_proto_bytes(proto: &[u8]) -> Self {
-        Self::from_proto(&zero_art_proto::User::decode(proto).unwrap())
     }
 }
