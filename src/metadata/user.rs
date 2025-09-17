@@ -16,9 +16,9 @@ pub struct User {
 // TODO: Replace .unwrap() with errors
 // TODO: Add TryFrom/From trait impls
 impl User {
-    pub fn new(name: String, picture: Vec<u8>, public_key: CortadoAffine) -> Self {
+    pub fn new(id: String, name: String, picture: Vec<u8>, public_key: CortadoAffine) -> Self {
         Self {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: id,
             name,
             public_key,
             picture,

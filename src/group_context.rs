@@ -175,15 +175,20 @@ impl GroupContext {
         &mut self,
         sp_frame: zero_art_proto::SpFrame,
     ) -> Result<Vec<zero_art_proto::Payload>, SDKError> {
-        // 1. Deserialize SP frame
-        let mut frame = sp_frame.frame.ok_or(SDKError::InvalidInput)?;
+        let frame = sp_frame.frame.ok_or(SDKError::InvalidInput)?;
 
-        // Strip proof/signature
-        let proof = frame.proof;
+        // Frame
         let mut frame_tbs = frame.frame.ok_or(SDKError::InvalidInput)?;
+        let frame_tbs_digest = Sha3_256::digest(frame_tbs.encode_to_vec());
+        let proof = frame.proof;
+
+        // FrameTbs
+        let protected_payload = std::mem::take(&mut frame_tbs.protected_payload);
+        let associated_data = Sha3_256::digest(frame_tbs.encode_to_vec());
 
         // Validate that frame belong to this group
-        if frame_tbs.group_id != self.metadata.id {
+        let group_id = frame_tbs.group_id;
+        if group_id != self.metadata.id {
             return Err(SDKError::InvalidInput);
         }
 
@@ -193,10 +198,6 @@ impl GroupContext {
             return Err(SDKError::InvalidEpoch);
         }
 
-        // Strip protected payload
-        // let protected_payload = std::mem::take(&mut frame_tbs.protected_payload);
-
-        let frame_digest = Sha3_256::digest(frame_tbs.encode_to_vec());
         let group_operation = frame_tbs.group_operation.clone();
 
         // Get stage key that will be used to decrypt protected payload to know if user is eligible for such actions
@@ -211,7 +212,7 @@ impl GroupContext {
 
             if let Some(branch_changes) = branch_changes {
                 let mut art_clone = self.art.clone();
-                art_clone.update_private_art(&branch_changes);
+                art_clone.update_private_art(&branch_changes)?;
                 let tree_key = art_clone.get_root_key()?;
                 let stage_key = derive_stage_key(&self.stk, tree_key.key)?;
                 (stage_key, Some(branch_changes))
@@ -222,11 +223,8 @@ impl GroupContext {
             (*self.stk, None)
         };
 
-        let protected_payload = std::mem::take(&mut frame_tbs.protected_payload);
-        let frame_digest = Sha3_256::digest(frame_tbs.encode_to_vec());
-
         // Decrypt protected payload
-        let protected_payload_bytes = decrypt(&stage_key, &protected_payload, &frame_digest)?;
+        let protected_payload_bytes = decrypt(&stage_key, &protected_payload, &associated_data)?;
         let protected_payload =
             zero_art_proto::ProtectedPayload::decode(&protected_payload_bytes[..])?;
         let protected_payload_tbs = protected_payload.payload.ok_or(SDKError::InvalidInput)?;
@@ -396,7 +394,10 @@ impl GroupContext {
             ScalarField::rand(&mut self.rng);
 
         // 2. Make node blank in ART and recompute STK
-        let (_, changes, artefacts) = self.art.make_blank(&self.art.get_path_to_leaf(&public_key).unwrap(), &temporary_leaf_secret)?;
+        let (_, changes, artefacts) = self.art.make_blank(
+            &self.art.get_path_to_leaf(&public_key).unwrap(),
+            &temporary_leaf_secret,
+        )?;
         self.advance_epoch()?;
 
         // 3. Create frame without encrypted payload
@@ -672,7 +673,7 @@ mod tests {
             secrets_factory.generate_secret_with_public_key();
         let leaf_secret = secrets_factory.generate_secret();
 
-        let user = metadata::user::User::new("user1".to_string(), vec![], identity_public_key);
+        let user = metadata::user::User::new("id1".to_string(), "user1".to_string(), vec![], identity_public_key);
         let group_info = metadata::group::GroupInfoBuilder::new()
             .id(uuid::Uuid::new_v4().to_string())
             .name("group1".to_string())

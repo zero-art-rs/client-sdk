@@ -133,8 +133,8 @@ message ProtectedPayloadTBS {
   google.protobuf.Timestamp created = 4;
   repeated Payload payload = 5;
   
-  GroupActionPayload group_action = 6;
-  bytes content = 7;
+  // GroupActionPayload group_action = 6;
+  // bytes content = 7;
 }
 
 // protected application layer message(decrypted Frame.protected_payload)

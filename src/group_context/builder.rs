@@ -450,26 +450,26 @@ impl FromInviteGroupContextBuilder {
         let invite_frame_protected_payload_tbs = invite_frame_protected_payload
             .payload
             .ok_or(SDKError::InvalidInput)?;
-        let group_action = invite_frame_protected_payload_tbs
-            .group_action
-            .ok_or(SDKError::InvalidInput)?;
-        let group_info = match group_action.action.ok_or(SDKError::InvalidInput)? {
-            zero_art_proto::group_action_payload::Action::InviteMember(group_info) => {
-                metadata::group::GroupInfo::from_proto(&group_info)
-            }
-            _ => return Err(SDKError::InvalidInput),
-        };
+        // let group_action = invite_frame_protected_payload_tbs
+        //     .group_action
+        //     .ok_or(SDKError::InvalidInput)?;
+        // let group_info = match group_action.action.ok_or(SDKError::InvalidInput)? {
+        //     zero_art_proto::group_action_payload::Action::InviteMember(group_info) => {
+        //         metadata::group::GroupInfo::from_proto(&group_info)
+        //     }
+        //     _ => return Err(SDKError::InvalidInput),
+        // };
 
-        let group_context = GroupContext {
-            art,
-            epoch: protected_invite_data.epoch,
-            stk: Box::new(stage_key),
-            rng: context_rng,
-            proof_system,
-            identity_key_pair: KeyPair::from_secret_key(self.init.identity_secret_key),
-            this_id: self.user.id(),
-            metadata: group_info,
-        };
+        // let group_context = GroupContext {
+        //     art,
+        //     epoch: protected_invite_data.epoch,
+        //     stk: Box::new(stage_key),
+        //     rng: context_rng,
+        //     proof_system,
+        //     identity_key_pair: KeyPair::from_secret_key(self.init.identity_secret_key),
+        //     this_id: self.user.id(),
+        //     metadata: group_info,
+        // };
 
         // group_context.update_key(self.leaf_secret, payload);
         Ok(())

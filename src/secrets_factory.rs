@@ -1,5 +1,5 @@
 use ark_ec::{AffineRepr, CurveGroup};
-use ark_ff::{PrimeField, UniformRand};
+use ark_ff::UniformRand;
 use ark_std::rand::{SeedableRng, rngs::StdRng, thread_rng};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 
