@@ -726,7 +726,7 @@ mod tests {
 
         let (mut group_context, frame, identified_invites, unidentified_invites) =
             builder::GroupContextBuilder::new(identity_secret_key)
-                .create(leaf_secret, user, group_info)
+                .create(user, group_info)
                 .unidentified_members_count(2)
                 .identified_members_keys(vec![(identified_public_key_1, Some(spk_public_key_1))])
                 .build()

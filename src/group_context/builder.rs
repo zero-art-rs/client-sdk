@@ -54,7 +54,6 @@ impl InitialGroupContextBuilder {
 
     pub fn create(
         self,
-        leaf_secret: ScalarField,
         user: metadata::user::User,
         group_info: metadata::group::GroupInfo,
     ) -> CreateGroupContextBuilder {
@@ -62,7 +61,6 @@ impl InitialGroupContextBuilder {
             init: self,
             user,
             group_info,
-            leaf_secret,
             identified_members_keys: Vec::new(),
             unidentified_members_count: 0,
             payloads: Vec::new(),
@@ -147,7 +145,6 @@ pub struct CreateGroupContextBuilder {
     init: InitialGroupContextBuilder,
     user: metadata::user::User,
     group_info: metadata::group::GroupInfo,
-    leaf_secret: ScalarField,
     identified_members_keys: Vec<(CortadoAffine, Option<CortadoAffine>)>,
     unidentified_members_count: usize,
     payloads: Vec<zero_art_proto::Payload>,
@@ -263,7 +260,7 @@ impl CreateGroupContextBuilder {
         }
 
         // 6. Build ART
-        let leaf_secret = self.leaf_secret;
+        let leaf_secret = ScalarField::rand(&mut context_rng);
         let (art, tk) = PrivateART::new_art_from_secrets(
             &vec![
                 vec![leaf_secret],
