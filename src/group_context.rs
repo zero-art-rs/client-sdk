@@ -166,11 +166,13 @@ pub struct GroupContext {
 }
 
 impl GroupContext {
-    pub fn into_parts(self) -> Result<(Vec<u8>, Vec<u8>, u64, Vec<u8>), SDKError> {
+    pub fn into_parts(self) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, u64, Vec<u8>), SDKError> {
+        let mut leaf_secret = Vec::new();
+        self.art.secret_key.serialize_uncompressed(&mut leaf_secret)?;
         let art = self.art.serialize()?;
         let stk = self.stk.to_vec();
         let metadata = self.metadata.to_proto_bytes();
-        Ok((art, stk, self.epoch, metadata))
+        Ok((leaf_secret, art, stk, self.epoch, metadata))
     }
 
     pub fn from_parts(identity_secret_key: ScalarField, leaf_secret: ScalarField, art: &[u8], stk: [u8; 32], epoch: u64, group_info: metadata::group::GroupInfo) -> Result<Self, SDKError> {
