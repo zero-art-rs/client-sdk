@@ -5,6 +5,7 @@ use ark_ff::{PrimeField, inv};
 use ark_std::rand::SeedableRng;
 use ark_std::rand::prelude::StdRng;
 use ark_std::{UniformRand, rand::Rng};
+use art::types::PublicART;
 use art::{
     errors::ARTError,
     traits::{ARTPrivateAPI, ARTPublicAPI},
@@ -165,6 +166,43 @@ pub struct GroupContext {
 }
 
 impl GroupContext {
+    pub fn into_parts(self) -> Result<(Vec<u8>, Vec<u8>, u64, Vec<u8>), SDKError> {
+        let art = self.art.serialize()?;
+        let stk = self.stk.to_vec();
+        let metadata = self.metadata.to_proto_bytes();
+        Ok((art, stk, self.epoch, metadata))
+    }
+
+    pub fn from_parts(identity_secret_key: ScalarField, leaf_secret: ScalarField, art: &[u8], stk: [u8; 32], epoch: u64, group_info: metadata::group::GroupInfo) -> Result<Self, SDKError> {
+        let art: PrivateART<CortadoAffine> = PrivateART::deserialize(art, &leaf_secret)?;
+
+        // 1. Init PRNGs
+        let context_rng = StdRng::from_rng(thread_rng()).unwrap();
+
+        let proof_system = proof_system::ProofSystem::default();
+
+        let identity_key_pair = KeyPair::from_secret_key(identity_secret_key);
+
+        let this_id = group_info
+            .members
+            .iter()
+            .filter(|(_, user)| user.public_key == identity_key_pair.public_key)
+            .take(1)
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        Ok(GroupContext {
+            art,
+            stk: Box::new(stk),
+            identity_key_pair,
+            epoch,
+            metadata: group_info,
+            proof_system,
+            rng: context_rng,
+            this_id,
+        })
+    }
+
     // process_frame should:
     // 1. Deserialize SP frame
     // 2. Validate epoch correctness
