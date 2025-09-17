@@ -295,7 +295,7 @@ impl CreateGroupContextBuilder {
                 },
             )?;
             let mut public_key_bytes = Vec::new();
-            identity_public_key.serialize_uncompressed(&mut public_key_bytes);
+            identity_public_key.serialize_uncompressed(&mut public_key_bytes)?;
             identified_invites.insert(public_key_bytes, invite);
         }
 
@@ -322,7 +322,16 @@ impl CreateGroupContextBuilder {
 
         let mut payloads = self.payloads;
         payloads.push(init_payload_bytes);
-        let frame = group_context.create_frame(payloads)?;
+        let mut frame = group_context.create_frame_unproved(payloads)?;
+
+        // 4. Build and sign (with identity key) frame
+        let proof = schnorr::sign(
+            &vec![identity_secret_key],
+            &vec![identity_public_key],
+            &Sha3_256::digest(frame.frame.as_ref().unwrap().encode_to_vec()),
+        )?;
+
+        frame.proof = proof;
 
         Ok((
             group_context,

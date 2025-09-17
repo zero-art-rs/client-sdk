@@ -217,7 +217,7 @@ impl GroupContext {
     // 1. Deserialize SP frame
     // 2. Validate epoch correctness
     // 3. Verify frame proof/signature
-    // 4.
+    // 4. 
     //
     pub fn process_frame(
         &mut self,
@@ -246,10 +246,9 @@ impl GroupContext {
             return Err(SDKError::InvalidEpoch);
         }
 
-        let group_operation = frame_tbs.group_operation.clone();
-
+        
         // Get stage key that will be used to decrypt protected payload to know if user is eligible for such actions
-
+        let group_operation = frame_tbs.group_operation.clone();
         let (stage_key, branch_changes) = if let Some(group_operation) = group_operation.clone() {
             let branch_changes = match group_operation.operation.ok_or(SDKError::InvalidInput)? {
                 Operation::AddMember(changes) => Some(BranchChanges::deserialize(&changes)?),
@@ -276,6 +275,48 @@ impl GroupContext {
         let protected_payload =
             zero_art_proto::ProtectedPayload::decode(&protected_payload_bytes[..])?;
         let protected_payload_tbs = protected_payload.payload.ok_or(SDKError::InvalidInput)?;
+
+        // Select group action payloads
+        let group_actions = protected_payload_tbs.payload.iter().filter(|&p| {
+            match p.content.as_ref().unwrap() {
+                zero_art_proto::payload::Content::Action(_) => true,
+                _ => false
+            }
+        }).map(|payload| {
+            match payload.content.as_ref().unwrap() {
+                zero_art_proto::payload::Content::Action(action) => {
+                    action.action.clone().unwrap()
+                },
+                _ => unreachable!()
+            }
+        })
+        .collect::<Vec<zero_art_proto::group_action_payload::Action>>();
+
+        for group_action in group_actions.into_iter() {
+            match group_action {
+                zero_art_proto::group_action_payload::Action::Init(_) => {}
+                zero_art_proto::group_action_payload::Action::InviteMember(_) => {}
+                zero_art_proto::group_action_payload::Action::RemoveMember(_) => {}
+                zero_art_proto::group_action_payload::Action::JoinGroup(_) => {}
+                zero_art_proto::group_action_payload::Action::ChangeUser(_) => {}
+                zero_art_proto::group_action_payload::Action::ChangeGroup(_) => {}
+                zero_art_proto::group_action_payload::Action::LeaveGroup(_) => {}
+                zero_art_proto::group_action_payload::Action::FinalizeRemoval(_) => {}
+            }
+        }
+
+        let new_group_members = protected_payload_tbs.payload.iter().filter(|&p| {
+            match p.content.as_ref().unwrap() {
+                zero_art_proto::payload::Content::Action(action) => {
+                    match action.action.as_ref().unwrap() {
+                        zero_art_proto::group_action_payload::Action::JoinGroup(_) => true,
+                        _ => false
+                    }
+                },
+                _ => false
+            }
+        }).collect::<Vec<&zero_art_proto::Payload>>();
+        let group_info = self.group_info.clone();
 
         let sender = match protected_payload_tbs.sender.ok_or(SDKError::InvalidInput)? {
             protected_payload_tbs::Sender::UserId(id) => self
@@ -503,6 +544,24 @@ impl GroupContext {
         &mut self,
         payloads: Vec<zero_art_proto::Payload>,
     ) -> Result<zero_art_proto::Frame, SDKError> {
+        let mut unproved_frame = self.create_frame_unproved(payloads)?;
+
+        // 4. Build and sign (with tree key) frame
+        let tk = self.art.get_root_key()?;
+        let proof = schnorr::sign(
+            &vec![tk.key],
+            &vec![(tk.generator * tk.key).into_affine()],
+            &Sha3_256::digest(unproved_frame.frame.as_ref().unwrap().encode_to_vec()),
+        )?;
+
+        unproved_frame.proof = proof;
+        Ok(unproved_frame)
+    }
+
+    pub fn create_frame_unproved(
+        &mut self,
+        payloads: Vec<zero_art_proto::Payload>,
+    ) -> Result<zero_art_proto::Frame, SDKError> {
         // 1. Parse provided payloads
 
         // 2. Build and sign (with identity key) general payload
@@ -552,16 +611,8 @@ impl GroupContext {
         frame_tbs.protected_payload = protected_payload;
 
         // 4. Build and sign (with tree key) frame
-        let tk = self.art.get_root_key()?;
-        let proof = schnorr::sign(
-            &vec![tk.key],
-            &vec![(tk.generator * tk.key).into_affine()],
-            &Sha3_256::digest(frame_tbs.encode_to_vec()),
-        )?;
-
         let frame = builders::FrameBuilder::new()
             .frame(frame_tbs)
-            .proof(proof)
             .build();
         Ok(frame)
     }

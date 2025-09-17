@@ -8,6 +8,4 @@ pub enum Error {
     ProtoError(#[from] prost::UnknownEnumValue),
     #[error("Required Field Absent")]
     RequiredFieldAbsent,
-    // #[error("Serialization Error")]
-    // (#[from] prost::UnknownEnumValue),
 }
