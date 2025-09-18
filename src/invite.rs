@@ -87,6 +87,8 @@ impl Invite {
             }
         };
 
+        println!("From leaf secret: {:?}", invite_leaf_secret);
+
         // Decrypt invite protected data
         let mut invite_stk = [0u8; 32];
         invite_leaf_secret.serialize_uncompressed(&mut invite_stk[..])?;
@@ -146,6 +148,8 @@ impl Invite {
                 )?)
             }
         };
+        //REMOVE
+        println!("Into leaf secret: {:?}", invite_leaf_secret);
 
         // Encrypt invite protected data
         let mut invite_stk = [0u8; 32];

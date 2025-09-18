@@ -542,6 +542,7 @@ impl GroupContext {
 
         // 1. Compute new member's leaf secret
         let leaf_secret = self.compute_member_leaf_secret(ephemeral_secret_key, invitee)?;
+        println!("Computed leaf secret: {:?}", leaf_secret);
 
         // 2. Add node to ART and recompute STK
         let (_, changes, artefacts) = self.art.append_or_replace_node(&leaf_secret)?;
@@ -996,7 +997,7 @@ mod tests {
         let mut secrets_factory = secrets_factory::SecretsFactory::default();
         let (identity_public_key, identity_secret_key) =
             secrets_factory.generate_secret_with_public_key();
-        let leaf_secret = secrets_factory.generate_secret();
+        // let leaf_secret = secrets_factory.generate_secret();
 
         let user = metadata::user::User {
             id: String::from("id"),
@@ -1014,28 +1015,77 @@ mod tests {
             members: metadata::group::GroupMembers::default(),
         };
 
-        let (identified_public_key_1, identified_secret_key_1) =
-            secrets_factory.generate_secret_with_public_key();
-        let (identified_public_key_2, identified_secret_key_2) =
-            secrets_factory.generate_secret_with_public_key();
-        let (identified_public_key_3, identified_secret_key_3) =
-            secrets_factory.generate_secret_with_public_key();
-        let (spk_public_key_1, spk_secret_key_1) =
-            secrets_factory.generate_secret_with_public_key();
-        let (spk_public_key_2, spk_secret_key_2) =
-            secrets_factory.generate_secret_with_public_key();
-        let (spk_public_key_3, spk_secret_key_3) =
-            secrets_factory.generate_secret_with_public_key();
+        // let (identified_public_key_1, identified_secret_key_1) =
+        //     secrets_factory.generate_secret_with_public_key();
+        // let (identified_public_key_2, identified_secret_key_2) =
+        //     secrets_factory.generate_secret_with_public_key();
+        // let (identified_public_key_3, identified_secret_key_3) =
+        //     secrets_factory.generate_secret_with_public_key();
+        // let (spk_public_key_1, spk_secret_key_1) =
+        //     secrets_factory.generate_secret_with_public_key();
+        // let (spk_public_key_2, spk_secret_key_2) =
+        //     secrets_factory.generate_secret_with_public_key();
+        // let (spk_public_key_3, spk_secret_key_3) =
+        //     secrets_factory.generate_secret_with_public_key();
 
         let (mut group_context, frame, identified_invites, unidentified_invites) =
             builder::GroupContextBuilder::new(identity_secret_key)
                 .create(user, group_info)
-                // .unidentified_members_count(0)
+                .unidentified_members_count(1)
                 // .identified_members_keys(vec![(identified_public_key_1, Some(spk_public_key_1))])
                 .build()
                 .unwrap();
 
-        println!("serialized art: {:?}", group_context.art.root);
+        // println!("serialized art: {:?}", group_context.art.root);
+
+        let (public_key, secret_key) =
+            secrets_factory.generate_secret_with_public_key();
+
+
+        let (_, invite) = group_context.add_member(invite::Invitee::Unidentified(secret_key), vec![]).unwrap();
+
+        let (invite, leaf_secret) = invite::Invite::try_from(invite, None).unwrap();
+        // println!("Invite: {:?}", leaf_secret);
+        let leaf_public_key = (CortadoAffine::generator() * leaf_secret).into_affine();
+
+        let mut public_key_is_wrong = true;
+        for node in LeafIter::new(group_context.art.get_root()) {
+            if node.public_key == leaf_public_key {
+                public_key_is_wrong = false;
+            }
+        }
+        println!("{:?}", public_key_is_wrong);
+
+
+        let (invite_public_key, invite_secret_key) =
+            secrets_factory.generate_secret_with_public_key();
+
+        let (inviter_public_key, inviter_secret_key) =
+            secrets_factory.generate_secret_with_public_key();
+
+        let (ephemeral_public_key, ephemeral_secret_key) =
+            secrets_factory.generate_secret_with_public_key();
+
+
+        let leaf_a = ScalarField::from_le_bytes_mod_order(&x3dh_a::<CortadoAffine>(
+                    inviter_secret_key,
+                    ephemeral_secret_key,
+                    invite_public_key,
+                    invite_public_key,
+        ).unwrap());
+        println!("Leaf A: {:?}", leaf_a);
+
+        let leaf_b = ScalarField::from_le_bytes_mod_order(&x3dh_b::<CortadoAffine>(
+                    invite_secret_key,
+                    invite_secret_key,
+                    inviter_public_key,
+                    ephemeral_public_key,
+        ).unwrap());
+        println!("Leaf B: {:?}", leaf_b);
+
+
+        
+
 
         // let frame = group_context.create_frame(vec![]).unwrap();
         // let res = group_context
