@@ -384,6 +384,10 @@ impl GroupContext {
                     return Err(SDKError::InvalidInput);
                 };
 
+                if owner_public_key == self.identity_key_pair.public_key {
+                    return Ok(vec![]);
+                }
+
                 self.art = art;
                 self.stk = Box::new(stk);
                 self.epoch = 0;
@@ -392,24 +396,22 @@ impl GroupContext {
                 return Ok(protected_payload_tbs.payload);
             }
             Operation::AddMember(changes) => {
-                if self.group_info.members.len() != 0 {
-                    let changes: BranchChanges<CortadoAffine> =
-                        BranchChanges::deserialize(&changes)?;
-                    let verification_artefacts =
-                        self.art.compute_artefacts_for_verification(&changes)?;
-                    let owner_leaf_public_key = self.group_owner_leaf_public_key()?;
-                    let proof = ARTProof::deserialize_uncompressed(&proof[..])?;
-                    self.proof_system.verify(
-                        verification_artefacts,
-                        &[owner_leaf_public_key],
-                        &associated_data,
-                        proof,
-                    )?;
-                    self.art.update_private_art(&changes)?;
-                    self.advance_epoch()?;
-                }
+                let changes: BranchChanges<CortadoAffine> =
+                    BranchChanges::deserialize(&changes)?;
+                let verification_artefacts =
+                    self.art.compute_artefacts_for_verification(&changes)?;
+                let owner_leaf_public_key = self.group_owner_leaf_public_key()?;
+                let proof = ARTProof::deserialize_uncompressed(&proof[..])?;
+                self.proof_system.verify(
+                    verification_artefacts,
+                    &[owner_leaf_public_key],
+                    &associated_data,
+                    proof,
+                )?;
 
-                let protected_payload = self.decrypt(&protected_payload, &associated_data)?;
+                let stk = self.simulate_art_change_with_stk(&changes)?;
+
+                let protected_payload = decrypt(&stk, &protected_payload, &associated_data)?;
                 let protected_payload =
                     zero_art_proto::ProtectedPayload::decode(&protected_payload[..])?;
 
@@ -419,19 +421,77 @@ impl GroupContext {
                     Sha3_256::digest(protected_payload_tbs.encode_to_vec());
                 let signature = protected_payload.signature;
 
-                let sender_id = match protected_payload_tbs.sender.ok_or(SDKError::InvalidInput)? {
-                    protected_payload_tbs::Sender::UserId(id) => id,
+                let sender = match protected_payload_tbs.sender.ok_or(SDKError::InvalidInput)? {
+                    protected_payload_tbs::Sender::UserId(id) => self.group_info.members.get_by_id(&id).ok_or(SDKError::InvalidInput)?,
                     _ => return Err(SDKError::InvalidInput),
                 };
 
-                let group_info: Vec<metadata::group::GroupInfo> = protected_payload_tbs
+                schnorr::verify(
+                    &signature,
+                    &vec![sender.public_key],
+                    &protected_payload_tbs_digest,
+                )?;
+
+
+                if sender.public_key == self.identity_key_pair.public_key {
+                    return Ok(vec![]);
+                }
+
+                self.art.update_private_art(&changes)?;
+                self.advance_epoch()?;
+
+
+                return Ok(protected_payload_tbs.payload);
+            }
+            Operation::KeyUpdate(changes) => {
+                let changes: BranchChanges<CortadoAffine> =
+                    BranchChanges::deserialize(&changes)?;
+                let verification_artefacts =
+                    self.art.compute_artefacts_for_verification(&changes)?;
+                let old_public_key = self.art.get_node(&changes.node_index)?.public_key; 
+                let proof = ARTProof::deserialize_uncompressed(&proof[..])?;
+                self.proof_system.verify(
+                    verification_artefacts,
+                    &[old_public_key],
+                    &associated_data,
+                    proof,
+                )?;
+
+                let stk = self.simulate_art_change_with_stk(&changes)?;
+
+                let protected_payload = decrypt(&stk, &protected_payload, &associated_data)?;
+                let protected_payload =
+                    zero_art_proto::ProtectedPayload::decode(&protected_payload[..])?;
+
+                let protected_payload_tbs =
+                    protected_payload.payload.ok_or(SDKError::InvalidInput)?;
+                let protected_payload_tbs_digest =
+                    Sha3_256::digest(protected_payload_tbs.encode_to_vec());
+                let signature = protected_payload.signature;
+
+                let sender = match protected_payload_tbs.sender.ok_or(SDKError::InvalidInput)? {
+                    protected_payload_tbs::Sender::UserId(id) => self.group_info.members.get_by_id(&id).ok_or(SDKError::InvalidInput)?,
+                    _ => return Err(SDKError::InvalidInput),
+                };
+
+                schnorr::verify(
+                    &signature,
+                    &vec![sender.public_key],
+                    &protected_payload_tbs_digest,
+                )?;
+
+                if sender.public_key == self.identity_key_pair.public_key {
+                    return Ok(vec![]);
+                }
+
+                let new_users: Vec<metadata::user::User> = protected_payload_tbs
                     .payload
                     .iter()
                     .filter_map(|payload| match payload.content.as_ref()? {
                         zero_art_proto::payload::Content::Action(action) => {
                             match action.action.as_ref()? {
-                                zero_art_proto::group_action_payload::Action::Init(group_info) => {
-                                    group_info.clone().try_into().ok()
+                                zero_art_proto::group_action_payload::Action::JoinGroup(user) => {
+                                    user.clone().try_into().ok()
                                 }
                                 _ => None,
                             }
@@ -440,26 +500,17 @@ impl GroupContext {
                     })
                     .collect();
 
-                if group_info.len() != 1 {
-                    return Err(SDKError::InvalidInput);
+                for user in new_users {
+                    self.group_info.members.add_user(user);
                 }
-                let group_info = group_info[0].clone();
 
-                let sender_public_key = group_info
-                    .members
-                    .get_by_id(&sender_id)
-                    .ok_or(SDKError::InvalidInput)?
-                    .public_key;
 
-                schnorr::verify(
-                    &signature,
-                    &vec![sender_public_key],
-                    &protected_payload_tbs_digest,
-                )?;
+                self.art.update_private_art(&changes)?;
+                self.advance_epoch()?;
 
-                self.group_info = group_info;
-            }
-            Operation::KeyUpdate(changes) => {}
+                return Ok(protected_payload_tbs.payload);
+
+            },
             _ => unimplemented!(),
         }
 
@@ -915,6 +966,13 @@ impl GroupContext {
             .next()
             .ok_or(SDKError::InvalidInput)?
             .get_public_key())
+    }
+
+    fn simulate_art_change_with_stk(&self, changes: &BranchChanges<CortadoAffine>) -> Result<[u8; 32], SDKError> {
+        let mut eph_art =  self.art.clone();
+        eph_art.update_private_art(changes)?;
+
+        derive_stage_key(&self.stk, eph_art.get_root_key()?.key)
     }
 }
 
