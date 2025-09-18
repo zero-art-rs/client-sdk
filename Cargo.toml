@@ -5,8 +5,8 @@ edition = "2024"
 
 [dependencies]
 zk = { git = "ssh://git@github.com/zk-messenger/project-m.git", branch = "art-dev" }
-# art = { git = "ssh://git@github.com/zk-messenger/project-m.git", branch = "art-dev" }
-art = { path = "../project-m/crates/art" }
+art = { git = "ssh://git@github.com/zk-messenger/project-m.git", branch = "art-dev" }
+# art = { path = "../project-m/crates/art" }
 crypto = { git = "ssh://git@github.com/zk-messenger/project-m.git", branch = "art-dev" }
 cortado = { git = "ssh://git@github.com/zk-messenger/project-m.git", branch = "art-dev" }
 bulletproofs = { version = "5.0.0", git="https://github.com/zk-messenger/bulletproofs"}
