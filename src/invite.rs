@@ -26,7 +26,7 @@ impl Invite {
     pub fn try_from(
         invite: zero_art_proto::Invite,
         invitee_secrets: Option<(ScalarField, Option<ScalarField>)>,
-    ) -> Result<Self, SDKError> {
+    ) -> Result<(Self, ScalarField), SDKError> {
         let signature = invite.signature;
         let invite = invite.invite.ok_or(SDKError::InvalidInput)?;
         let invite_digest = Sha3_256::digest(invite.encode_to_vec());
@@ -102,14 +102,14 @@ impl Invite {
             .ok_or(SDKError::InvalidInput)?
             .try_into()?;
 
-        Ok(Self {
+        Ok((Self {
             invitee,
             inviter_public_key,
             ephemeral_public_key,
             stage_key,
             epoch,
             group_info,
-        })
+        }, invite_leaf_secret))
     }
 
     pub fn try_into(
