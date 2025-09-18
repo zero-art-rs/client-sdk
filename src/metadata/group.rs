@@ -20,6 +20,19 @@ impl GroupMembers {
         self.by_id.insert(id, user);
     }
 
+    pub fn remove_by_id(&mut self, id: &str) -> Option<User> {
+        if let Some(user) = self.by_id.remove(id) {
+            self.by_public_key.remove(&user.public_key);
+            Some(user)
+        } else {
+            None
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_id.len()
+    }
+
     pub fn get_by_id(&self, id: &str) -> Option<&User> {
         self.by_id.get(id)
     }

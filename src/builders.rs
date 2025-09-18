@@ -184,10 +184,10 @@ impl ProtectedInviteDataBuilder {
     }
 
     // TODO: Replace String with &str or AsRef<str>
-    pub fn group_id(mut self, group_id: String) -> Self {
-        self.0.group_id = group_id;
-        self
-    }
+    // pub fn group_id(mut self, group_id: String) -> Self {
+    //     self.0.group_id = group_id;
+    //     self
+    // }
 
     pub fn epoch(mut self, epoch: u64) -> Self {
         self.0.epoch = epoch;

@@ -1,6 +1,7 @@
 pub mod builders;
 pub mod frame;
 pub mod group_context;
+pub mod invite;
 pub mod metadata;
 pub mod proof_system;
 pub mod secrets_factory;

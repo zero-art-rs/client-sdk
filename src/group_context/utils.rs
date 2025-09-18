@@ -9,6 +9,7 @@ use hkdf::Hkdf;
 use sha3::Sha3_256;
 
 use crate::group_context::InvitationKeys;
+use crate::invite;
 
 use aes_gcm::aead::{Aead, KeyInit, Nonce, Payload};
 use aes_gcm::{Aes256Gcm, Key};
@@ -27,22 +28,20 @@ impl GroupContext {
     pub(super) fn compute_member_leaf_secret(
         &self,
         ephemeral_secret_key: ScalarField,
-        invitation_keys: InvitationKeys,
+        invitee: invite::Invitee,
     ) -> Result<ScalarField, SDKError> {
         // Compute new member leaf secret
-        let (identity_public_key, invitation_public_key) = match invitation_keys {
-            InvitationKeys::Identified {
+        let (identity_public_key, invitation_public_key) = match invitee {
+            invite::Invitee::Identified {
                 identity_public_key,
                 spk_public_key,
             } => (
                 identity_public_key,
                 spk_public_key.unwrap_or(identity_public_key),
             ),
-            InvitationKeys::Unidentified {
-                invitation_secret_key,
-            } => {
+            invite::Invitee::Unidentified(secret_key) => {
                 let invitation_public_key =
-                    (CortadoAffine::generator() * invitation_secret_key).into_affine();
+                    (CortadoAffine::generator() * secret_key).into_affine();
                 (invitation_public_key, invitation_public_key)
             }
         };

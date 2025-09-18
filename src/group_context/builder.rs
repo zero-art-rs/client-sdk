@@ -14,11 +14,8 @@ use sha3::{Digest, Sha3_256};
 
 use crate::{
     group_context::{
-        GroupContext, InvitationKeys, KeyPair, SDKError,
-        utils::{self, decrypt},
-    },
-    metadata::{self, group},
-    proof_system, zero_art_proto,
+        utils::{self, decrypt}, GroupContext, InvitationKeys, KeyPair, SDKError
+    }, invite, metadata::{self, group}, proof_system, zero_art_proto
 };
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, serialize_to_vec};
@@ -287,25 +284,30 @@ impl CreateGroupContextBuilder {
 
         // 9. Create invitations
         for (identity_public_key, spk_public_key) in identified_members_keys {
-            let invite = group_context.create_invite(
-                ephemeral_public_key,
-                InvitationKeys::Identified {
-                    identity_public_key,
-                    spk_public_key: spk_public_key,
-                },
-            )?;
+            let invite = invite::Invite {
+                invitee: invite::Invitee::Identified { identity_public_key, spk_public_key },
+                inviter_public_key: CortadoAffine::default(),
+                ephemeral_public_key: CortadoAffine::default(),
+                epoch: 0,
+                group_info: group_info.clone(),
+                stage_key: stk,
+            }.try_into(identity_secret_key, ephemeral_secret_key)?;
+
             let mut public_key_bytes = Vec::new();
             identity_public_key.serialize_uncompressed(&mut public_key_bytes)?;
             identified_invites.insert(public_key_bytes, invite);
         }
 
         for secret_key in unidentified_leaf_secrets {
-            let invite = group_context.create_invite(
-                ephemeral_public_key,
-                InvitationKeys::Unidentified {
-                    invitation_secret_key: secret_key,
-                },
-            )?;
+            let invite = invite::Invite {
+                invitee: invite::Invitee::Unidentified(secret_key),
+                inviter_public_key: CortadoAffine::default(),
+                ephemeral_public_key: CortadoAffine::default(),
+                epoch: 0,
+                group_info: group_info.clone(),
+                stage_key: stk,
+            }.try_into(identity_secret_key, ephemeral_secret_key)?;
+
             unidentified_invites.push(invite);
         }
 
