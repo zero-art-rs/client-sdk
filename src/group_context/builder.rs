@@ -116,7 +116,7 @@ impl InitialGroupContextBuilder {
         schnorr::verify(
             &invite.signature,
             &vec![inviter_public_key],
-            &invite_tbs.encode_to_vec(),
+            &Sha3_256::digest(invite_tbs.encode_to_vec()),
         )?;
 
         Ok(FromInviteGroupContextBuilder {

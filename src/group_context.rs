@@ -459,9 +459,8 @@ impl GroupContext {
 
                 self.group_info = group_info;
             }
-            Operation::DropGroup(_) => unimplemented!(),
             Operation::KeyUpdate(changes) => {}
-            _ => return Err(SDKError::InvalidInput),
+            _ => unimplemented!(),
         }
 
         // 2. Validate epoch correctness

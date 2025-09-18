@@ -174,7 +174,7 @@ impl Invite {
         let signature = schnorr::sign(
             &vec![inviter_secret_key],
             &vec![inviter_public_key],
-            &invite_tbs.encode_to_vec(),
+            &Sha3_256::digest(invite_tbs.encode_to_vec()),
         )?;
 
         Ok(zero_art_proto::Invite {
