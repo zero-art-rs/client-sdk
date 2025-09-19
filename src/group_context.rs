@@ -449,7 +449,7 @@ impl GroupContext {
                 println!("Process, Before STK: {:?}", self.stk);
                 println!("Process, Before TK: {:?}", self.art.get_root_key());
                 println!("Process, Changes: {:?}", changes);
-                self.art.update_private_art(&changes)?;
+                self.art.update_public_art(&changes)?;
                 self.advance_epoch()?;
                 println!("Process, After STK: {:?}", self.stk);
                 println!("Process, After TK: {:?}", self.art.get_root_key());
