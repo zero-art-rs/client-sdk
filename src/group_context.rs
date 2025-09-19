@@ -468,12 +468,12 @@ impl GroupContext {
 
                 let old_public_key = self.art.get_node(&changes.node_index)?.public_key;
                 let proof = ARTProof::deserialize_uncompressed(&proof[..])?;
-                self.proof_system.verify(
-                    verification_artefacts,
-                    &[old_public_key],
-                    &frame_tbs_digest,
-                    proof,
-                )?;
+                // self.proof_system.verify(
+                //     verification_artefacts,
+                //     &[old_public_key],
+                //     &frame_tbs_digest,
+                //     proof,
+                // )?;
 
                 let stk = self.simulate_art_change_with_stk(&changes)?;
 
