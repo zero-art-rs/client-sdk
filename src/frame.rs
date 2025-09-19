@@ -4,12 +4,20 @@ use cortado::CortadoAffine;
 use uuid::Uuid;
 use zk::art::ARTProof;
 
-use crate::{metadata, zero_art_proto};
+use crate::{group_context::SDKError, metadata, zero_art_proto};
 
 pub struct Frame {
     pub frame_tbs: FrameTbs,
     pub proof: Proof,
 }
+
+// impl TryFrom<zero_art_proto::Frame> for Frame {
+//     type Error = SDKError;
+    
+//     fn try_from(value: zero_art_proto::Frame) -> Result<Self, Self::Error> {
+        
+//     }
+// }
 
 pub enum Proof {
     ArtProof(ARTProof),
@@ -28,6 +36,14 @@ pub struct FrameTbs {
     inner: zero_art_proto::FrameTbs,
 }
 
+impl TryFrom<zero_art_proto::FrameTbs> for FrameTbs {
+    type Error = SDKError;
+    fn try_from(value: zero_art_proto::FrameTbs) -> Result<Self, Self::Error> {
+        unimplemented!();
+        let group_id: Uuid = Uuid::parse_str(&value.group_id).map_err(|_| SDKError::InvalidInput)?;
+    }
+}
+
 pub enum GroupOperation {
     Init(PublicART<CortadoAffine>),
     AddMember(BranchChanges<CortadoAffine>),
@@ -35,6 +51,22 @@ pub enum GroupOperation {
     KeyUpdate(BranchChanges<CortadoAffine>),
     LeaveGroup,
     DropGroup(Vec<u8>),
+}
+
+impl TryFrom<zero_art_proto::GroupOperation> for GroupOperation {
+    type Error = SDKError;
+
+    fn try_from(value: zero_art_proto::GroupOperation) -> Result<Self, Self::Error> {
+        unimplemented!();
+        match value.operation.ok_or(SDKError::InvalidInput)? {
+            zero_art_proto::group_operation::Operation::KeyUpdate(changes) => {},
+            zero_art_proto::group_operation::Operation::Init(_) => {},
+            zero_art_proto::group_operation::Operation::AddMember(_) => {},
+            zero_art_proto::group_operation::Operation::RemoveMember(_) => {},
+            zero_art_proto::group_operation::Operation::LeaveGroup(_) => {GroupOperation::LeaveGroup;},
+            zero_art_proto::group_operation::Operation::DropGroup(_) => {},
+        };
+    }
 }
 
 pub struct ProtectedPayload {

@@ -169,6 +169,12 @@ pub struct GroupContext {
 }
 
 impl GroupContext {
+    pub fn sign_with_tk(&self, msg: &[u8]) -> Result<Vec<u8>, SDKError> {
+        let tk = self.art.get_root_key()?;
+        let tk_public_key = (CortadoAffine::generator() * tk.key).into_affine();
+        Ok(schnorr::sign(&vec![tk.key], &vec![tk_public_key], msg)?)
+    }
+
     pub fn into_parts(self) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, u64, Vec<u8>), SDKError> {
         let group_info: zero_art_proto::GroupInfo = self.group_info.into();
 
