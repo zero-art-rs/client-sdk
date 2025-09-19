@@ -372,6 +372,16 @@ pub enum Payload {
     Chat(zero_art_proto::chat_payload::Payload),
 }
 
+impl Payload {
+    pub fn encode_to_vec(&self) -> Vec<u8> {
+        zero_art_proto::Payload::from(self.clone()).encode_to_vec()
+    }
+
+    pub fn decode(data: &[u8]) -> Result<Self, SDKError> {
+        Ok(zero_art_proto::Payload::decode(data)?.try_into()?)
+    }
+}
+
 impl TryFrom<zero_art_proto::Payload> for Payload {
     type Error = SDKError;
 
