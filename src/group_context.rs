@@ -463,22 +463,28 @@ impl GroupContext {
             }
             Operation::KeyUpdate(changes) => {
                 let changes: BranchChanges<CortadoAffine> = BranchChanges::deserialize(&changes)?;
-//
+                //
                 let stk = self.simulate_art_change_with_stk(&changes)?;
                 println!("Current STK: {:?}", self.stk);
                 println!("Upgraded STK: {:?}", stk);
                 println!("Protected payload: {:?}", protected_payload);
                 println!("Associated data: {:?}", associated_data);
-                let protected_payload = decrypt(&stk, &protected_payload, &associated_data)?;
+                let cprotected = protected_payload.clone();
+                let protected_payload = decrypt(&stk, &protected_payload, &associated_data);
+                let protected_payload = if let Err(err) = protected_payload {
+                    self.decrypt(&cprotected, &associated_data)?
+                } else {
+                    protected_payload.unwrap()
+                };
                 let protected_payload =
-                zero_art_proto::ProtectedPayload::decode(&protected_payload[..])?;
-//
+                    zero_art_proto::ProtectedPayload::decode(&protected_payload[..])?;
+                //
                 let protected_payload_tbs =
-                protected_payload.payload.ok_or(SDKError::InvalidInput)?;
+                    protected_payload.payload.ok_or(SDKError::InvalidInput)?;
                 let protected_payload_tbs_digest =
                     Sha3_256::digest(protected_payload_tbs.encode_to_vec());
                 let signature = protected_payload.signature;
-//
+                //
                 let mut temp_group_info = self.group_info.clone();
                 let new_users: Vec<metadata::user::User> = protected_payload_tbs
                     .payload
@@ -500,7 +506,7 @@ impl GroupContext {
                 }
 
                 //
-                                let sender = match protected_payload_tbs.sender.ok_or(SDKError::InvalidInput)? {
+                let sender = match protected_payload_tbs.sender.ok_or(SDKError::InvalidInput)? {
                     protected_payload_tbs::Sender::UserId(id) => temp_group_info
                         .members
                         .get_by_id(&id)
@@ -531,16 +537,7 @@ impl GroupContext {
                     proof,
                 )?;
 
-
-                
-
-
-
-
-
-
                 self.group_info = temp_group_info;
-
 
                 self.art.update_private_art(&changes)?;
                 self.advance_epoch()?;
@@ -958,13 +955,18 @@ impl GroupContext {
 
         // 4. Encrypt provided payload and attach to frame
         println!("Current STK: {:?}", self.stk);
-        println!("Associated data: {:?}", &Sha3_256::digest(frame_tbs.encode_to_vec()));
-        
-        let protected_payload =
-            self.encrypt(&payload.encode_to_vec(), &Sha3_256::digest(frame_tbs.encode_to_vec()))?;
-            println!("Protected payload: {:?}", protected_payload);
-            frame_tbs.protected_payload = protected_payload;
-        
+        println!(
+            "Associated data: {:?}",
+            &Sha3_256::digest(frame_tbs.encode_to_vec())
+        );
+
+        let protected_payload = self.encrypt(
+            &payload.encode_to_vec(),
+            &Sha3_256::digest(frame_tbs.encode_to_vec()),
+        )?;
+        println!("Protected payload: {:?}", protected_payload);
+        frame_tbs.protected_payload = protected_payload;
+
         // 5. Generate proof for ART change with SHA3-256(frame) in associated data
 
         // Calculate SHA3-256 digest of frame
@@ -1079,7 +1081,8 @@ mod tests {
 
         assert!(result.is_ok(), "Failed to create group context");
 
-        let (mut group_context, init_frame, identified_invites, unidentified_invites) = result.unwrap();
+        let (mut group_context, init_frame, identified_invites, unidentified_invites) =
+            result.unwrap();
 
         assert_eq!(
             identified_invites.len(),
@@ -1122,10 +1125,23 @@ mod tests {
         let (identity_public_key_1, identity_secret_key_1) = key_pairs[1];
         let (spk_public_key_2, spk_secret_key_2) = key_pairs[2];
 
-        let (secondary_group_context, join_group_frame) = GroupContext::from_invite(identity_secret_key_1, Some(spk_secret_key_2), public_art_bytes, invite, user_1).unwrap();
+        let (mut secondary_group_context, join_group_frame) = GroupContext::from_invite(
+            identity_secret_key_1,
+            Some(spk_secret_key_2),
+            public_art_bytes,
+            invite,
+            user_1,
+        )
+        .unwrap();
 
-        group_context.process_frame(zero_art_proto::SpFrame { seq_num: 0, created: None, frame: Some(join_group_frame) }).unwrap();
-
+        let payloads = secondary_group_context
+            .process_frame(zero_art_proto::SpFrame {
+                seq_num: 0,
+                created: None,
+                frame: Some(join_group_frame),
+            })
+            .unwrap();
+        assert_eq!(payloads.len(), 0);
     }
 
     // #[test]

@@ -8,7 +8,10 @@ use uuid::Uuid;
 use zk::art::ARTProof;
 
 use crate::{
-    group_context::{utils::{decrypt, encrypt}, SDKError},
+    group_context::{
+        SDKError,
+        utils::{decrypt, encrypt},
+    },
     metadata, zero_art_proto,
 };
 
@@ -102,10 +105,14 @@ impl FrameTbs {
         std::mem::take(&mut inner.protected_payload);
         let associated_data = Sha3_256::digest(inner.encode_to_vec());
 
-        let payload: zero_art_proto::ProtectedPayload = self.decrypted_payload.clone().ok_or(SDKError::InvalidInput)?.into();
+        let payload: zero_art_proto::ProtectedPayload = self
+            .decrypted_payload
+            .clone()
+            .ok_or(SDKError::InvalidInput)?
+            .into();
         let payload_bytes = payload.encode_to_vec();
         self.protected_payload = encrypt(stage_key, &payload_bytes, &associated_data)?;
-        
+
         Ok(())
     }
 
