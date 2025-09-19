@@ -21,6 +21,17 @@ pub struct Frame {
     pub proof: Proof,
 }
 
+impl Frame {
+    pub fn encode_to_vec(&self) -> Result<Vec<u8>, SDKError> {
+        let inner: zero_art_proto::Frame = self.clone().try_into()?;
+        Ok(inner.encode_to_vec())
+    }
+
+    pub fn decode(data: Vec<u8>) -> Result<Self, SDKError> {
+        zero_art_proto::Frame::decode(&data[..])?.try_into()
+    }
+}
+
 impl TryFrom<zero_art_proto::Frame> for Frame {
     type Error = SDKError;
 
@@ -119,6 +130,10 @@ impl FrameTbs {
     pub fn encode_to_vec(&self) -> Result<Vec<u8>, SDKError> {
         let inner: zero_art_proto::FrameTbs = self.clone().try_into()?;
         Ok(inner.encode_to_vec())
+    }
+
+    pub fn decode(data: Vec<u8>) -> Result<Self, SDKError> {
+        zero_art_proto::FrameTbs::decode(&data[..])?.try_into()
     }
 }
 
@@ -268,16 +283,23 @@ pub struct ProtectedPayloadTbs {
     pub created: DateTime<Utc>,
     pub payloads: Vec<Payload>,
     pub sender: Sender,
+}
 
-    inner: zero_art_proto::ProtectedPayloadTbs,
+impl ProtectedPayloadTbs {
+    pub fn encode_to_vec(&self) -> Vec<u8> {
+        let inner: zero_art_proto::ProtectedPayloadTbs = self.clone().into();
+        inner.encode_to_vec()
+    }
+
+    pub fn decode(data: Vec<u8>) -> Result<Self, SDKError> {
+        zero_art_proto::ProtectedPayloadTbs::decode(&data[..])?.try_into()
+    }
 }
 
 impl TryFrom<zero_art_proto::ProtectedPayloadTbs> for ProtectedPayloadTbs {
     type Error = SDKError;
 
     fn try_from(value: zero_art_proto::ProtectedPayloadTbs) -> Result<Self, Self::Error> {
-        let inner = value.clone();
-
         let timestamp_proto = value.created.ok_or(SDKError::InvalidInput)?;
         let created =
             DateTime::from_timestamp(timestamp_proto.seconds, timestamp_proto.nanos as u32)
@@ -294,7 +316,6 @@ impl TryFrom<zero_art_proto::ProtectedPayloadTbs> for ProtectedPayloadTbs {
             created,
             payloads,
             sender,
-            inner,
         })
     }
 }
