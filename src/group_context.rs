@@ -439,12 +439,13 @@ impl GroupContext {
 
                 let verification_artefacts =
                     self.art.compute_artefacts_for_verification(&changes)?;
-                let owner_leaf_public_key = self.group_owner_leaf_public_key()?;
+
+                let old_leaf_public_key = self.art.get_node(&changes.node_index)?.public_key;
                 match frame.proof {
                     frame::Proof::ArtProof(art_proof) => {
                         self.proof_system.verify(
                             verification_artefacts,
-                            &vec![owner_leaf_public_key],
+                            &vec![old_leaf_public_key],
                             &Sha3_256::digest(frame.frame_tbs.encode_to_vec()?),
                             art_proof,
                         )?;
@@ -916,6 +917,8 @@ impl GroupContext {
         // Calculate SHA3-256 digest of frame
         let frame_digest = Sha3_256::digest(frame_tbs.encode_to_vec());
 
+        let old_public_key = (CortadoAffine::generator() * old_secret).into_affine();
+
         // Prove changes
         let proof = self
             .proof_system
@@ -1108,7 +1111,7 @@ mod tests {
             .process_frame(zero_art_proto::SpFrame {
                 seq_num: 0,
                 created: None,
-                frame: Some(frame),
+                frame: Some(join_group_frame),
             })
             .unwrap();
 
