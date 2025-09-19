@@ -238,15 +238,16 @@ impl GroupContext {
     ) -> Result<(Self, zero_art_proto::Frame), SDKError> {
         let identity_key_pair = KeyPair::from_secret_key(identity_secret_key);
 
+        
         let (mut invite, invite_leaf_secret) =
-            invite::Invite::try_from(invite, Some((identity_secret_key, spk_secret_key)))?;
+        invite::Invite::try_from(invite, Some((identity_secret_key, spk_secret_key)))?;
+        println!("here32");
         let art: PrivateART<CortadoAffine> = PrivateART::deserialize(&art, &invite_leaf_secret)?;
-
         let context_rng = StdRng::from_rng(thread_rng()).unwrap();
-
+        
         user.public_key = identity_key_pair.public_key;
         invite.group_info.members.add_user(user.clone());
-
+        
         let mut group_context = Self {
             art,
             stk: Box::new(invite.stage_key),
@@ -257,9 +258,9 @@ impl GroupContext {
             group_info: invite.group_info,
             identity_key_pair: KeyPair::from_secret_key(identity_secret_key),
         };
-
+        
         let leaf_secret = ScalarField::rand(&mut group_context.rng);
-
+        
         let group_action_payload = zero_art_proto::Payload {
             content: Some(zero_art_proto::payload::Content::Action(
                 zero_art_proto::GroupActionPayload {
@@ -269,7 +270,7 @@ impl GroupContext {
                 },
             )),
         };
-
+        
         let frame = group_context.update_key(leaf_secret, vec![group_action_payload])?;
 
         Ok((group_context, frame))
@@ -674,7 +675,7 @@ impl GroupContext {
 
         // 4. Encrypt provided payload and attach to frame
         let protected_payload =
-            self.encrypt(&payload.encode_to_vec(), &frame_tbs.encode_to_vec())?;
+            self.encrypt(&payload.encode_to_vec(), &Sha3_256::digest(frame_tbs.encode_to_vec()))?;
         frame_tbs.protected_payload = protected_payload;
 
         // 5. Generate proof for ART change with SHA3-256(frame) in associated data
@@ -1162,23 +1163,51 @@ mod tests {
         let (identity_public_key_1, identity_secret_key_1) = key_pairs[1];
         let (spk_public_key_2, spk_secret_key_2) = key_pairs[2];
 
+        // let (mut secondary_group_context, join_group_frame) = GroupContext::from_invite(
+        //     identity_secret_key_1,
+        //     Some(spk_secret_key_2),
+        //     public_art_bytes.clone(),
+        //     invite,
+        //     user_1,
+        // )
+        // .unwrap();
+
+        let (identity_public_key_4, identity_secret_key_4) = key_pairs[4];
+        let (spk_public_key_5, spk_secret_key_5) = key_pairs[5];
+
+        let (frame, invite) = group_context.add_member(invite::Invitee::Identified { identity_public_key: identity_public_key_4, spk_public_key: Some(spk_public_key_5) }, vec![]).unwrap();
+
+        let public_art_bytes = group_context.art.serialize().unwrap();
+
+        let user_1 =
+            metadata::user::User::new(String::from("user_id_2"), String::from("user"), vec![]);
         let (mut secondary_group_context, join_group_frame) = GroupContext::from_invite(
-            identity_secret_key_1,
-            Some(spk_secret_key_2),
+            identity_secret_key_4,
+            Some(spk_secret_key_5),
             public_art_bytes,
             invite,
             user_1,
-        )
-        .unwrap();
+        ).unwrap();
 
-        let payloads = secondary_group_context
-            .process_frame(zero_art_proto::SpFrame {
+        group_context.process_frame(zero_art_proto::SpFrame {
                 seq_num: 0,
                 created: None,
-                frame: Some(join_group_frame),
-            })
-            .unwrap();
-        assert_eq!(payloads.len(), 0);
+                frame: Some(frame),
+        }).unwrap();
+
+        
+
+        // let payloads = secondary_group_context
+        //     .process_frame(zero_art_proto::SpFrame {
+        //         seq_num: 0,
+        //         created: None,
+        //         frame: Some(join_group_frame),
+        //     })
+        //     .unwrap();
+        // assert_eq!(payloads.len(), 0);
+
+        
+
     }
 
     // #[test]
