@@ -476,7 +476,10 @@ impl GroupContext {
                 // )?;
 
                 let stk = self.simulate_art_change_with_stk(&changes)?;
-
+                println!("Current STK: {:?}", self.stk);
+                println!("Upgraded STK: {:?}", stk);
+                println!("Protected payload: {:?}", protected_payload);
+                println!("Associated data: {:?}", associated_data);
                 let protected_payload = decrypt(&stk, &protected_payload, &associated_data)?;
                 let protected_payload =
                 zero_art_proto::ProtectedPayload::decode(&protected_payload[..])?;
@@ -945,10 +948,14 @@ impl GroupContext {
             .build();
 
         // 4. Encrypt provided payload and attach to frame
+        println!("Current STK: {:?}", self.stk);
+        println!("Associated data: {:?}", &Sha3_256::digest(frame_tbs.encode_to_vec()));
+        
         let protected_payload =
             self.encrypt(&payload.encode_to_vec(), &Sha3_256::digest(frame_tbs.encode_to_vec()))?;
-        frame_tbs.protected_payload = protected_payload;
-
+            println!("Protected payload: {:?}", protected_payload);
+            frame_tbs.protected_payload = protected_payload;
+        
         // 5. Generate proof for ART change with SHA3-256(frame) in associated data
 
         // Calculate SHA3-256 digest of frame
