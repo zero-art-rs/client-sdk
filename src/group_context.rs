@@ -421,7 +421,7 @@ impl GroupContext {
                 self.proof_system.verify(
                     verification_artefacts,
                     &[owner_leaf_public_key],
-                    &associated_data,
+                    &frame_tbs_digest,
                     proof,
                 )?;
 
@@ -465,12 +465,13 @@ impl GroupContext {
                 let changes: BranchChanges<CortadoAffine> = BranchChanges::deserialize(&changes)?;
                 let verification_artefacts =
                     self.art.compute_artefacts_for_verification(&changes)?;
+
                 let old_public_key = self.art.get_node(&changes.node_index)?.public_key;
                 let proof = ARTProof::deserialize_uncompressed(&proof[..])?;
                 self.proof_system.verify(
                     verification_artefacts,
                     &[old_public_key],
-                    &associated_data,
+                    &frame_tbs_digest,
                     proof,
                 )?;
 

@@ -8,7 +8,7 @@ use uuid::Uuid;
 use zk::art::ARTProof;
 
 use crate::{
-    group_context::{SDKError, utils::decrypt},
+    group_context::{utils::{decrypt, encrypt}, SDKError},
     metadata, zero_art_proto,
 };
 
@@ -80,15 +80,15 @@ pub struct FrameTbs {
 
     pub protected_payload: Vec<u8>,
     pub decrypted_payload: Option<ProtectedPayload>,
-
-    inner: zero_art_proto::FrameTbs,
 }
 
 impl FrameTbs {
     pub fn decrypt(&mut self, stage_key: &[u8; 32]) -> Result<(), SDKError> {
-        let mut inner = self.inner.clone();
+        // TODO: may be we should store inner
+        let mut inner: zero_art_proto::FrameTbs = self.clone().try_into()?;
         std::mem::take(&mut inner.protected_payload);
         let associated_data = Sha3_256::digest(inner.encode_to_vec());
+
         let payload_bytes = decrypt(stage_key, &self.protected_payload, &associated_data)?;
         let payload = zero_art_proto::ProtectedPayload::decode(&payload_bytes[..])?;
         self.decrypted_payload = Some(payload.try_into()?);
@@ -96,18 +96,29 @@ impl FrameTbs {
         Ok(())
     }
 
-    // pub fn encode_to_vec(&self) -> Vec<u8> {
-        
+    pub fn encrypt(&mut self, stage_key: &[u8; 32]) -> Result<(), SDKError> {
+        // TODO: may be we should store inner
+        let mut inner: zero_art_proto::FrameTbs = self.clone().try_into()?;
+        std::mem::take(&mut inner.protected_payload);
+        let associated_data = Sha3_256::digest(inner.encode_to_vec());
 
-    // }
+        let payload: zero_art_proto::ProtectedPayload = self.decrypted_payload.clone().ok_or(SDKError::InvalidInput)?.into();
+        let payload_bytes = payload.encode_to_vec();
+        self.protected_payload = encrypt(stage_key, &payload_bytes, &associated_data)?;
+        
+        Ok(())
+    }
+
+    pub fn encode_to_vec(&self) -> Result<Vec<u8>, SDKError> {
+        let inner: zero_art_proto::FrameTbs = self.clone().try_into()?;
+        Ok(inner.encode_to_vec())
+    }
 }
 
 impl TryFrom<zero_art_proto::FrameTbs> for FrameTbs {
     type Error = SDKError;
 
     fn try_from(value: zero_art_proto::FrameTbs) -> Result<Self, Self::Error> {
-        let inner = value.clone();
-
         let group_id = Uuid::parse_str(&value.group_id).map_err(|_| SDKError::InvalidInput)?;
 
         let group_operation = if let Some(group_operation) = value.group_operation {
@@ -123,7 +134,6 @@ impl TryFrom<zero_art_proto::FrameTbs> for FrameTbs {
             group_operation,
             protected_payload: value.protected_payload,
             decrypted_payload: None,
-            inner,
         })
     }
 }
