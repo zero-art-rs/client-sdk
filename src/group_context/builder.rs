@@ -98,6 +98,7 @@ impl InitialGroupContextBuilder {
             stk: Box::new(stk),
             identity_key_pair,
             epoch,
+            seq_num: 0,
             group_info,
             proof_system,
             rng: context_rng,
@@ -279,6 +280,7 @@ impl CreateGroupContextBuilder {
         let mut group_context = GroupContext {
             art,
             epoch: 0,
+            seq_num: 0,
             stk: Box::new(stk),
             rng: context_rng,
             proof_system,
