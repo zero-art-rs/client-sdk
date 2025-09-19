@@ -463,18 +463,7 @@ impl GroupContext {
             }
             Operation::KeyUpdate(changes) => {
                 let changes: BranchChanges<CortadoAffine> = BranchChanges::deserialize(&changes)?;
-                let verification_artefacts =
-                    self.art.compute_artefacts_for_verification(&changes)?;
-
-                let old_public_key = self.art.get_node(&changes.node_index)?.public_key;
-                let proof = ARTProof::deserialize_uncompressed(&proof[..])?;
-                // self.proof_system.verify(
-                //     verification_artefacts,
-                //     &[old_public_key],
-                //     &frame_tbs_digest,
-                //     proof,
-                // )?;
-
+//
                 let stk = self.simulate_art_change_with_stk(&changes)?;
                 println!("Current STK: {:?}", self.stk);
                 println!("Upgraded STK: {:?}", stk);
@@ -483,13 +472,13 @@ impl GroupContext {
                 let protected_payload = decrypt(&stk, &protected_payload, &associated_data)?;
                 let protected_payload =
                 zero_art_proto::ProtectedPayload::decode(&protected_payload[..])?;
-                
+//
                 let protected_payload_tbs =
                 protected_payload.payload.ok_or(SDKError::InvalidInput)?;
                 let protected_payload_tbs_digest =
                     Sha3_256::digest(protected_payload_tbs.encode_to_vec());
                 let signature = protected_payload.signature;
-
+//
                 let mut temp_group_info = self.group_info.clone();
                 let new_users: Vec<metadata::user::User> = protected_payload_tbs
                     .payload
@@ -510,14 +499,15 @@ impl GroupContext {
                     temp_group_info.members.add_user(user);
                 }
 
-                let sender = match protected_payload_tbs.sender.ok_or(SDKError::InvalidInput)? {
+                //
+                                let sender = match protected_payload_tbs.sender.ok_or(SDKError::InvalidInput)? {
                     protected_payload_tbs::Sender::UserId(id) => temp_group_info
                         .members
                         .get_by_id(&id)
                         .ok_or(SDKError::InvalidInput)?,
                     _ => return Err(SDKError::InvalidInput),
                 };
-
+                //
 
                 schnorr::verify(
                     &signature,
@@ -528,6 +518,25 @@ impl GroupContext {
                 if sender.public_key == self.identity_key_pair.public_key {
                     return Ok(vec![]);
                 }
+
+                let verification_artefacts =
+                    self.art.compute_artefacts_for_verification(&changes)?;
+
+                let old_public_key = self.art.get_node(&changes.node_index)?.public_key;
+                let proof = ARTProof::deserialize_uncompressed(&proof[..])?;
+                self.proof_system.verify(
+                    verification_artefacts,
+                    &[old_public_key],
+                    &frame_tbs_digest,
+                    proof,
+                )?;
+
+
+                
+
+
+
+
 
 
                 self.group_info = temp_group_info;
