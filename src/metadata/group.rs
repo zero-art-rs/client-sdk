@@ -76,13 +76,25 @@ impl From<GroupMembers> for Vec<zero_art_proto::User> {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct GroupInfo {
     pub id: String,
     pub name: String,
     pub created: DateTime<Utc>,
     pub metadata: Vec<u8>,
     pub members: GroupMembers,
+}
+
+impl GroupInfo {
+    pub fn new(id: String, name: String, metadata: Vec<u8>) -> Self {
+        Self {
+            id,
+            name,
+            created: Utc::now(),
+            metadata,
+            members: GroupMembers::default(),
+        }
+    }
 }
 
 impl TryFrom<zero_art_proto::GroupInfo> for GroupInfo {

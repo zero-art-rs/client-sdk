@@ -14,8 +14,12 @@ use sha3::{Digest, Sha3_256};
 
 use crate::{
     group_context::{
-        utils::{self, decrypt}, GroupContext, InvitationKeys, KeyPair, SDKError
-    }, invite, metadata::{self, group}, proof_system, zero_art_proto
+        GroupContext, InvitationKeys, KeyPair, SDKError,
+        utils::{self, decrypt},
+    },
+    invite,
+    metadata::{self, group},
+    proof_system, zero_art_proto,
 };
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, serialize_to_vec};
@@ -285,13 +289,17 @@ impl CreateGroupContextBuilder {
         // 9. Create invitations
         for (identity_public_key, spk_public_key) in identified_members_keys {
             let invite = invite::Invite {
-                invitee: invite::Invitee::Identified { identity_public_key, spk_public_key },
+                invitee: invite::Invitee::Identified {
+                    identity_public_key,
+                    spk_public_key,
+                },
                 inviter_public_key: CortadoAffine::default(),
                 ephemeral_public_key: CortadoAffine::default(),
                 epoch: 0,
                 group_info: group_info.clone(),
                 stage_key: stk,
-            }.try_into(identity_secret_key, ephemeral_secret_key)?;
+            }
+            .try_into(identity_secret_key, ephemeral_secret_key)?;
 
             let mut public_key_bytes = Vec::new();
             identity_public_key.serialize_uncompressed(&mut public_key_bytes)?;
@@ -306,7 +314,8 @@ impl CreateGroupContextBuilder {
                 epoch: 0,
                 group_info: group_info.clone(),
                 stage_key: stk,
-            }.try_into(identity_secret_key, ephemeral_secret_key)?;
+            }
+            .try_into(identity_secret_key, ephemeral_secret_key)?;
 
             unidentified_invites.push(invite);
         }

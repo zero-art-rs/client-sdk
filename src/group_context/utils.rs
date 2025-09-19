@@ -40,8 +40,7 @@ impl GroupContext {
                 spk_public_key.unwrap_or(identity_public_key),
             ),
             invite::Invitee::Unidentified(secret_key) => {
-                let invitation_public_key =
-                    (CortadoAffine::generator() * secret_key).into_affine();
+                let invitation_public_key = (CortadoAffine::generator() * secret_key).into_affine();
                 (invitation_public_key, invitation_public_key)
             }
         };

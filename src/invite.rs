@@ -87,8 +87,6 @@ impl Invite {
             }
         };
 
-        println!("From leaf secret: {:?}", invite_leaf_secret);
-
         // Decrypt invite protected data
         let mut invite_stk = [0u8; 32];
         invite_leaf_secret.serialize_uncompressed(&mut invite_stk[..])?;
@@ -104,14 +102,17 @@ impl Invite {
             .ok_or(SDKError::InvalidInput)?
             .try_into()?;
 
-        Ok((Self {
-            invitee,
-            inviter_public_key,
-            ephemeral_public_key,
-            stage_key,
-            epoch,
-            group_info,
-        }, invite_leaf_secret))
+        Ok((
+            Self {
+                invitee,
+                inviter_public_key,
+                ephemeral_public_key,
+                stage_key,
+                epoch,
+                group_info,
+            },
+            invite_leaf_secret,
+        ))
     }
 
     pub fn try_into(
@@ -148,8 +149,6 @@ impl Invite {
                 )?)
             }
         };
-        //REMOVE
-        println!("Into leaf secret: {:?}", invite_leaf_secret);
 
         // Encrypt invite protected data
         let mut invite_stk = [0u8; 32];

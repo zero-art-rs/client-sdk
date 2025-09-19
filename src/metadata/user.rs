@@ -2,7 +2,7 @@ use crate::{metadata::error::Error, zero_art_proto};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use cortado::CortadoAffine;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct User {
     pub id: String,
     pub name: String,
@@ -10,6 +10,17 @@ pub struct User {
     pub metadata: Vec<u8>,
     // ?: Should we create separate enum?
     pub role: zero_art_proto::Role,
+}
+
+impl User {
+    pub fn new(id: String, name: String, metadata: Vec<u8>) -> Self {
+        Self {
+            id,
+            name,
+            metadata,
+            ..Self::default()
+        }
+    }
 }
 
 impl TryFrom<zero_art_proto::User> for User {
