@@ -5,6 +5,7 @@ use crate::{
 use chrono::{DateTime, Utc};
 use cortado::CortadoAffine;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 #[derive(Debug, Default, Clone)]
 pub struct GroupMembers {
@@ -78,7 +79,7 @@ impl From<GroupMembers> for Vec<zero_art_proto::User> {
 
 #[derive(Debug, Default, Clone)]
 pub struct GroupInfo {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
     pub created: DateTime<Utc>,
     pub metadata: Vec<u8>,
@@ -86,7 +87,7 @@ pub struct GroupInfo {
 }
 
 impl GroupInfo {
-    pub fn new(id: String, name: String, metadata: Vec<u8>) -> Self {
+    pub fn new(id: Uuid, name: String, metadata: Vec<u8>) -> Self {
         Self {
             id,
             name,
@@ -107,7 +108,7 @@ impl TryFrom<zero_art_proto::GroupInfo> for GroupInfo {
                 .ok_or(Error::RequiredFieldAbsent)?;
 
         Ok(Self {
-            id: value.id,
+            id: Uuid::parse_str(&value.id).map_err(|_| Error::RequiredFieldAbsent)?,
             name: value.name,
             created,
             metadata: value.picture,
@@ -119,7 +120,7 @@ impl TryFrom<zero_art_proto::GroupInfo> for GroupInfo {
 impl From<GroupInfo> for zero_art_proto::GroupInfo {
     fn from(value: GroupInfo) -> Self {
         Self {
-            id: value.id,
+            id: value.id.to_string(),
             name: value.name,
             created: Some(prost_types::Timestamp {
                 seconds: value.created.timestamp(),

@@ -15,7 +15,7 @@ use crate::{
     metadata, zero_art_proto,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Frame {
     pub frame_tbs: FrameTbs,
     pub proof: Proof,
@@ -85,7 +85,13 @@ pub enum Proof {
     SchnorrSignature(Vec<u8>),
 }
 
-#[derive(Debug, Clone)]
+impl Default for Proof {
+    fn default() -> Self {
+        Proof::SchnorrSignature(Vec::default())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct FrameTbs {
     pub group_id: Uuid,
     pub epoch: u64,
@@ -181,12 +187,13 @@ impl TryFrom<FrameTbs> for zero_art_proto::FrameTbs {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum GroupOperation {
     Init(PublicART<CortadoAffine>),
     AddMember(BranchChanges<CortadoAffine>),
     RemoveMember(BranchChanges<CortadoAffine>),
     KeyUpdate(BranchChanges<CortadoAffine>),
+    #[default]
     LeaveGroup,
     DropGroup(Vec<u8>),
 }
@@ -249,7 +256,7 @@ impl TryFrom<GroupOperation> for zero_art_proto::GroupOperation {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ProtectedPayload {
     pub protected_payload_tbs: ProtectedPayloadTbs,
     pub signature: Vec<u8>,
@@ -277,7 +284,7 @@ impl From<ProtectedPayload> for zero_art_proto::ProtectedPayload {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ProtectedPayloadTbs {
     pub seq_num: u64,
     pub created: DateTime<Utc>,
@@ -347,6 +354,12 @@ pub enum Sender {
     LeafId(String),
 }
 
+impl Default for Sender {
+    fn default() -> Self {
+        Sender::UserId(String::default())
+    }
+}
+
 impl From<zero_art_proto::protected_payload_tbs::Sender> for Sender {
     fn from(value: zero_art_proto::protected_payload_tbs::Sender) -> Self {
         match value {
@@ -379,6 +392,12 @@ impl Payload {
 
     pub fn decode(data: &[u8]) -> Result<Self, SDKError> {
         Ok(zero_art_proto::Payload::decode(data)?.try_into()?)
+    }
+}
+
+impl Default for Payload {
+    fn default() -> Self {
+        Payload::Action(GroupActionPayload::default())
     }
 }
 
@@ -432,6 +451,12 @@ pub enum GroupActionPayload {
     ChangeGroup(metadata::group::GroupInfo),
     LeaveGroup(metadata::user::User),
     FinalizeRemoval(metadata::user::User),
+}
+
+impl Default for GroupActionPayload {
+    fn default() -> Self {
+        GroupActionPayload::Init(metadata::group::GroupInfo::default())
+    }
 }
 
 impl TryFrom<zero_art_proto::GroupActionPayload> for GroupActionPayload {

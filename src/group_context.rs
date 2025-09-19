@@ -235,7 +235,7 @@ impl GroupContext {
         art: Vec<u8>,
         invite: zero_art_proto::Invite,
         mut user: metadata::user::User,
-    ) -> Result<(Self, zero_art_proto::Frame), SDKError> {
+    ) -> Result<(Self, frame::Frame), SDKError> {
         let identity_key_pair = KeyPair::from_secret_key(identity_secret_key);
 
         let (mut invite, invite_leaf_secret) =
@@ -259,15 +259,8 @@ impl GroupContext {
 
         let leaf_secret = ScalarField::rand(&mut group_context.rng);
 
-        let group_action_payload = zero_art_proto::Payload {
-            content: Some(zero_art_proto::payload::Content::Action(
-                zero_art_proto::GroupActionPayload {
-                    action: Some(zero_art_proto::group_action_payload::Action::JoinGroup(
-                        user.into(),
-                    )),
-                },
-            )),
-        };
+        let group_action_payload =
+            frame::Payload::Action(frame::GroupActionPayload::JoinGroup(user));
 
         let frame = group_context.update_key(leaf_secret, vec![group_action_payload])?;
 
@@ -287,7 +280,7 @@ impl GroupContext {
         let frame = sp_frame.frame.ok_or(SDKError::InvalidInput)?;
         let mut frame = frame::Frame::try_from(frame)?;
         // Validate that frame belong to this group
-        let group_id = frame.frame_tbs.group_id.to_string();
+        let group_id = frame.frame_tbs.group_id;
         if group_id != self.group_info.id {
             return Err(SDKError::InvalidInput);
         }
@@ -585,7 +578,7 @@ impl GroupContext {
 
         let mut frame_tbs = builders::FrameTbsBuilder::new()
             .epoch(self.epoch)
-            .group_id(self.group_info.id.clone())
+            .group_id(self.group_info.id.to_string())
             .group_operation(group_operation)
             .build();
 
@@ -663,7 +656,7 @@ impl GroupContext {
             .build();
         let mut frame_tbs = builders::FrameTbsBuilder::new()
             .epoch(self.epoch)
-            .group_id(self.group_info.id.clone())
+            .group_id(self.group_info.id.to_string())
             .group_operation(group_operation)
             .build();
 
@@ -766,7 +759,7 @@ impl GroupContext {
         self.rng.fill(&mut nonce);
         let mut frame_tbs = builders::FrameTbsBuilder::new()
             .epoch(self.epoch)
-            .group_id(self.group_info.id.clone())
+            .group_id(self.group_info.id.to_string())
             .nonce(nonce.into())
             .build();
 
@@ -829,7 +822,7 @@ impl GroupContext {
 
         let mut frame_tbs = builders::FrameTbsBuilder::new()
             .epoch(self.epoch)
-            .group_id(self.group_info.id.clone())
+            .group_id(self.group_info.id.to_string())
             .nonce(identity_public_key_bytes)
             .group_operation(zero_art_proto::GroupOperation {
                 operation: Some(zero_art_proto::group_operation::Operation::Init(
@@ -858,8 +851,8 @@ impl GroupContext {
     pub fn update_key(
         &mut self,
         leaf_secret: ScalarField,
-        payloads: Vec<zero_art_proto::Payload>,
-    ) -> Result<zero_art_proto::Frame, SDKError> {
+        payloads: Vec<frame::Payload>,
+    ) -> Result<frame::Frame, SDKError> {
         // 1. Update own leaf with provided secret and recompute STK
         let old_secret = self.art.secret_key;
 
@@ -870,77 +863,50 @@ impl GroupContext {
         println!("Generate, After STK: {:?}", self.stk);
         println!("Generate, After TK: {:?}", self.art.get_root_key());
 
-        // 3. Create frame without encrypted payload
-        let group_operation = builders::GroupOperationBuilder::new()
-            .operation(Operation::KeyUpdate(changes.serialze()?))
-            .build();
-
-        // 5. Build and sign (with identity key) general payload
-        let timestamp = Utc::now();
-        let payload_tbs = builders::ProtectedPayloadTbsBuilder::new()
-            .payload(payloads)
-            .created(Timestamp {
-                seconds: timestamp.timestamp(),
-                nanos: timestamp.timestamp_subsec_nanos() as i32,
-            })
-            // TODO: Replace with seq_num
-            // ?: If this is global counter then there can be collisions
-            .seq_num(0)
-            .sender(zero_art_proto::protected_payload_tbs::Sender::UserId(
-                self.group_info
-                    .members
-                    .get_by_public_key(&self.identity_key_pair.public_key)
-                    .ok_or(SDKError::InvalidInput)?
-                    .id
-                    .clone(),
-            ))
-            .build();
+        let mut payload = frame::ProtectedPayload {
+            protected_payload_tbs: frame::ProtectedPayloadTbs {
+                seq_num: 0,
+                created: Utc::now(),
+                payloads: payloads,
+                sender: frame::Sender::UserId(
+                    self.group_info
+                        .members
+                        .get_by_public_key(&self.identity_key_pair.public_key)
+                        .ok_or(SDKError::InvalidInput)?
+                        .id
+                        .clone(),
+                ),
+            },
+            signature: Vec::new(),
+        };
 
         let signature = schnorr::sign(
             &vec![self.identity_key_pair.secret_key],
             &vec![self.identity_key_pair.public_key],
-            &Sha3_256::digest(payload_tbs.encode_to_vec()),
+            &Sha3_256::digest(payload.protected_payload_tbs.encode_to_vec()),
         )?;
+        payload.signature = signature;
 
-        let payload = builders::ProtectedPayloadBuilder::new()
-            .payload(payload_tbs)
-            .signature(signature)
-            .build();
-
-        let mut frame_tbs = builders::FrameTbsBuilder::new()
-            .epoch(self.epoch)
-            .group_id(self.group_info.id.clone())
-            .group_operation(group_operation)
-            .build();
-
-        // 4. Encrypt provided payload and attach to frame
-        let protected_payload = self.encrypt(
-            &payload.encode_to_vec(),
-            &Sha3_256::digest(frame_tbs.encode_to_vec()),
-        )?;
-        frame_tbs.protected_payload = protected_payload;
-
-        // 5. Generate proof for ART change with SHA3-256(frame) in associated data
-
-        // Calculate SHA3-256 digest of frame
-        let frame_digest = Sha3_256::digest(frame_tbs.encode_to_vec());
-
-        let old_public_key = (CortadoAffine::generator() * old_secret).into_affine();
+        let mut frame = frame::Frame {
+            frame_tbs: frame::FrameTbs {
+                group_id: self.group_info.id.clone(),
+                epoch: self.epoch,
+                nonce: vec![],
+                group_operation: Some(frame::GroupOperation::KeyUpdate(changes)),
+                protected_payload: Vec::new(),
+                decrypted_payload: Some(payload),
+            },
+            proof: frame::Proof::default(),
+        };
+        frame.frame_tbs.encrypt(&self.stk)?;
 
         // Prove changes
-        let proof = self
-            .proof_system
-            // review this
-            .prove(artefacts, &vec![old_secret], &frame_digest)?;
-
-        // Serialize proof
-        let mut proof_bytes = Vec::new();
-        proof.serialize_uncompressed(&mut proof_bytes)?;
-
-        let frame = builders::FrameBuilder::new()
-            .frame(frame_tbs)
-            .proof(proof_bytes)
-            .build();
+        let proof = self.proof_system.prove(
+            artefacts,
+            &vec![old_secret],
+            &Sha3_256::digest(frame.frame_tbs.encode_to_vec()?),
+        )?;
+        frame.proof = frame::Proof::ArtProof(proof);
 
         Ok(frame)
     }
@@ -988,6 +954,8 @@ impl GroupContext {
 
 #[cfg(test)]
 mod tests {
+    use uuid::Uuid;
+
     use crate::{group_context, secrets_factory};
 
     use super::*;
@@ -1011,7 +979,7 @@ mod tests {
         let owner_user =
             metadata::user::User::new(String::from("owner_id_1"), String::from("owner"), vec![]);
         let group_info = metadata::group::GroupInfo::new(
-            String::from("123e4567-e89b-12d3-a456-426655440000"),
+            Uuid::parse_str("123e4567-e89b-12d3-a456-426655440000").unwrap(),
             String::from("group_1"),
             vec![],
         );
@@ -1119,7 +1087,7 @@ mod tests {
             .process_frame(zero_art_proto::SpFrame {
                 seq_num: 0,
                 created: None,
-                frame: Some(join_group_frame),
+                frame: Some(join_group_frame.try_into().unwrap()),
             })
             .unwrap();
 
