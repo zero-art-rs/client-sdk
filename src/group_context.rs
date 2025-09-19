@@ -175,6 +175,10 @@ impl GroupContext {
         Ok(schnorr::sign(&vec![tk.key], &vec![tk_public_key], msg)?)
     }
 
+    pub fn get_epoch(&self) -> u64 {
+        self.epoch
+    }
+
     pub fn into_parts(self) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, u64, Vec<u8>), SDKError> {
         let group_info: zero_art_proto::GroupInfo = self.group_info.into();
 
