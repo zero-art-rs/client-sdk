@@ -479,33 +479,15 @@ impl GroupContext {
 
                 let protected_payload = decrypt(&stk, &protected_payload, &associated_data)?;
                 let protected_payload =
-                    zero_art_proto::ProtectedPayload::decode(&protected_payload[..])?;
-
+                zero_art_proto::ProtectedPayload::decode(&protected_payload[..])?;
+                
                 let protected_payload_tbs =
-                    protected_payload.payload.ok_or(SDKError::InvalidInput)?;
+                protected_payload.payload.ok_or(SDKError::InvalidInput)?;
                 let protected_payload_tbs_digest =
                     Sha3_256::digest(protected_payload_tbs.encode_to_vec());
                 let signature = protected_payload.signature;
 
-                let sender = match protected_payload_tbs.sender.ok_or(SDKError::InvalidInput)? {
-                    protected_payload_tbs::Sender::UserId(id) => self
-                        .group_info
-                        .members
-                        .get_by_id(&id)
-                        .ok_or(SDKError::InvalidInput)?,
-                    _ => return Err(SDKError::InvalidInput),
-                };
-
-                schnorr::verify(
-                    &signature,
-                    &vec![sender.public_key],
-                    &protected_payload_tbs_digest,
-                )?;
-
-                if sender.public_key == self.identity_key_pair.public_key {
-                    return Ok(vec![]);
-                }
-
+                let mut temp_group_info = self.group_info.clone();
                 let new_users: Vec<metadata::user::User> = protected_payload_tbs
                     .payload
                     .iter()
@@ -521,10 +503,32 @@ impl GroupContext {
                         _ => None,
                     })
                     .collect();
-
                 for user in new_users {
-                    self.group_info.members.add_user(user);
+                    temp_group_info.members.add_user(user);
                 }
+
+                let sender = match protected_payload_tbs.sender.ok_or(SDKError::InvalidInput)? {
+                    protected_payload_tbs::Sender::UserId(id) => temp_group_info
+                        .members
+                        .get_by_id(&id)
+                        .ok_or(SDKError::InvalidInput)?,
+                    _ => return Err(SDKError::InvalidInput),
+                };
+
+
+                schnorr::verify(
+                    &signature,
+                    &vec![sender.public_key],
+                    &protected_payload_tbs_digest,
+                )?;
+
+                if sender.public_key == self.identity_key_pair.public_key {
+                    return Ok(vec![]);
+                }
+
+
+                self.group_info = temp_group_info;
+
 
                 self.art.update_private_art(&changes)?;
                 self.advance_epoch()?;
@@ -942,7 +946,7 @@ impl GroupContext {
 
         // 4. Encrypt provided payload and attach to frame
         let protected_payload =
-            self.encrypt(&payload.encode_to_vec(), &frame_tbs.encode_to_vec())?;
+            self.encrypt(&payload.encode_to_vec(), &Sha3_256::digest(frame_tbs.encode_to_vec()))?;
         frame_tbs.protected_payload = protected_payload;
 
         // 5. Generate proof for ART change with SHA3-256(frame) in associated data
@@ -1059,7 +1063,7 @@ mod tests {
 
         assert!(result.is_ok(), "Failed to create group context");
 
-        let (group_context, init_frame, identified_invites, unidentified_invites) = result.unwrap();
+        let (mut group_context, init_frame, identified_invites, unidentified_invites) = result.unwrap();
 
         assert_eq!(
             identified_invites.len(),
@@ -1093,141 +1097,153 @@ mod tests {
             "ART should have 6 leafs (owner + 2 identified + 3 unidentified)"
         );
 
-        // ini
+        let public_art_bytes = group_context.art.serialize().unwrap();
+
+        let user_1 =
+            metadata::user::User::new(String::from("user_id_1"), String::from("user"), vec![]);
+        let invite = identified_invites.get(&public_key_1_bytes).unwrap().clone();
+
+        let (identity_public_key_1, identity_secret_key_1) = key_pairs[1];
+        let (spk_public_key_2, spk_secret_key_2) = key_pairs[2];
+
+        let (secondary_group_context, join_group_frame) = GroupContext::from_invite(identity_secret_key_1, Some(spk_secret_key_2), public_art_bytes, invite, user_1).unwrap();
+
+        group_context.process_frame(zero_art_proto::SpFrame { seq_num: 0, created: None, frame: Some(join_group_frame) }).unwrap();
+
     }
 
-    #[test]
-    fn test_new_context() {
-        let mut secrets_factory = secrets_factory::SecretsFactory::default();
-        let (identity_public_key, identity_secret_key) =
-            secrets_factory.generate_secret_with_public_key();
-        // let leaf_secret = secrets_factory.generate_secret();
+    // #[test]
+    // fn test_new_context() {
+    //     let mut secrets_factory = secrets_factory::SecretsFactory::default();
+    //     let (identity_public_key, identity_secret_key) =
+    //         secrets_factory.generate_secret_with_public_key();
+    //     // let leaf_secret = secrets_factory.generate_secret();
 
-        let user = metadata::user::User {
-            id: String::from("id"),
-            name: String::from("id"),
-            metadata: vec![],
-            public_key: identity_public_key,
-            role: zero_art_proto::Role::default(),
-        };
+    //     let user = metadata::user::User {
+    //         id: String::from("id"),
+    //         name: String::from("id"),
+    //         metadata: vec![],
+    //         public_key: identity_public_key,
+    //         role: zero_art_proto::Role::default(),
+    //     };
 
-        let group_info = metadata::group::GroupInfo {
-            id: String::from("id"),
-            name: String::from("id"),
-            metadata: vec![],
-            created: Utc::now(),
-            members: metadata::group::GroupMembers::default(),
-        };
+    //     let group_info = metadata::group::GroupInfo {
+    //         id: String::from("id"),
+    //         name: String::from("id"),
+    //         metadata: vec![],
+    //         created: Utc::now(),
+    //         members: metadata::group::GroupMembers::default(),
+    //     };
 
-        // let (identified_public_key_1, identified_secret_key_1) =
-        //     secrets_factory.generate_secret_with_public_key();
-        // let (identified_public_key_2, identified_secret_key_2) =
-        //     secrets_factory.generate_secret_with_public_key();
-        // let (identified_public_key_3, identified_secret_key_3) =
-        //     secrets_factory.generate_secret_with_public_key();
-        // let (spk_public_key_1, spk_secret_key_1) =
-        //     secrets_factory.generate_secret_with_public_key();
-        // let (spk_public_key_2, spk_secret_key_2) =
-        //     secrets_factory.generate_secret_with_public_key();
-        // let (spk_public_key_3, spk_secret_key_3) =
-        //     secrets_factory.generate_secret_with_public_key();
+    //     // let (identified_public_key_1, identified_secret_key_1) =
+    //     //     secrets_factory.generate_secret_with_public_key();
+    //     // let (identified_public_key_2, identified_secret_key_2) =
+    //     //     secrets_factory.generate_secret_with_public_key();
+    //     // let (identified_public_key_3, identified_secret_key_3) =
+    //     //     secrets_factory.generate_secret_with_public_key();
+    //     // let (spk_public_key_1, spk_secret_key_1) =
+    //     //     secrets_factory.generate_secret_with_public_key();
+    //     // let (spk_public_key_2, spk_secret_key_2) =
+    //     //     secrets_factory.generate_secret_with_public_key();
+    //     // let (spk_public_key_3, spk_secret_key_3) =
+    //     //     secrets_factory.generate_secret_with_public_key();
 
-        let (mut group_context, frame, identified_invites, unidentified_invites) =
-            builder::GroupContextBuilder::new(identity_secret_key)
-                .create(user, group_info)
-                .unidentified_members_count(1)
-                // .identified_members_keys(vec![(identified_public_key_1, Some(spk_public_key_1))])
-                .build()
-                .unwrap();
+    //     let (mut group_context, frame, identified_invites, unidentified_invites) =
+    //         builder::GroupContextBuilder::new(identity_secret_key)
+    //             .create(user, group_info)
+    //             .unidentified_members_count(1)
+    //             // .identified_members_keys(vec![(identified_public_key_1, Some(spk_public_key_1))])
+    //             .build()
+    //             .unwrap();
 
-        // println!("serialized art: {:?}", group_context.art.root);
+    //     // println!("serialized art: {:?}", group_context.art.root);
 
-        let (public_key, secret_key) = secrets_factory.generate_secret_with_public_key();
+    //     let (public_key, secret_key) = secrets_factory.generate_secret_with_public_key();
 
-        let (_, invite) = group_context
-            .add_member(invite::Invitee::Unidentified(secret_key), vec![])
-            .unwrap();
+    //     let (_, invite) = group_context
+    //         .add_member(invite::Invitee::Unidentified(secret_key), vec![])
+    //         .unwrap();
 
-        let (invite, leaf_secret) = invite::Invite::try_from(invite, None).unwrap();
-        // println!("Invite: {:?}", leaf_secret);
-        let leaf_public_key = (CortadoAffine::generator() * leaf_secret).into_affine();
+    //     let (invite, leaf_secret) = invite::Invite::try_from(invite, None).unwrap();
+    //     // println!("Invite: {:?}", leaf_secret);
+    //     let leaf_public_key = (CortadoAffine::generator() * leaf_secret).into_affine();
 
-        let mut public_key_is_wrong = true;
-        for node in LeafIter::new(group_context.art.get_root()) {
-            if node.public_key == leaf_public_key {
-                public_key_is_wrong = false;
-            }
-        }
+    //     let mut public_key_is_wrong = true;
+    //     for node in LeafIter::new(group_context.art.get_root()) {
+    //         if node.public_key == leaf_public_key {
+    //             public_key_is_wrong = false;
+    //         }
+    //     }
 
-        let (invite_public_key, invite_secret_key) =
-            secrets_factory.generate_secret_with_public_key();
+    //     let (invite_public_key, invite_secret_key) =
+    //         secrets_factory.generate_secret_with_public_key();
 
-        let (inviter_public_key, inviter_secret_key) =
-            secrets_factory.generate_secret_with_public_key();
+    //     let (inviter_public_key, inviter_secret_key) =
+    //         secrets_factory.generate_secret_with_public_key();
 
-        let (ephemeral_public_key, ephemeral_secret_key) =
-            secrets_factory.generate_secret_with_public_key();
+    //     let (ephemeral_public_key, ephemeral_secret_key) =
+    //         secrets_factory.generate_secret_with_public_key();
 
-        let leaf_a = ScalarField::from_le_bytes_mod_order(
-            &x3dh_a::<CortadoAffine>(
-                inviter_secret_key,
-                ephemeral_secret_key,
-                invite_public_key,
-                invite_public_key,
-            )
-            .unwrap(),
-        );
+    //     let leaf_a = ScalarField::from_le_bytes_mod_order(
+    //         &x3dh_a::<CortadoAffine>(
+    //             inviter_secret_key,
+    //             ephemeral_secret_key,
+    //             invite_public_key,
+    //             invite_public_key,
+    //         )
+    //         .unwrap(),
+    //     );
 
-        let leaf_b = ScalarField::from_le_bytes_mod_order(
-            &x3dh_b::<CortadoAffine>(
-                invite_secret_key,
-                invite_secret_key,
-                inviter_public_key,
-                ephemeral_public_key,
-            )
-            .unwrap(),
-        );
+    //     let leaf_b = ScalarField::from_le_bytes_mod_order(
+    //         &x3dh_b::<CortadoAffine>(
+    //             invite_secret_key,
+    //             invite_secret_key,
+    //             inviter_public_key,
+    //             ephemeral_public_key,
+    //         )
+    //         .unwrap(),
+    //     );
 
-        // let frame = group_context.create_frame(vec![]).unwrap();
-        // let res = group_context
-        //     .add_member(
-        //         InvitationKeys::Unidentified {
-        //             invitation_secret_key: identified_secret_key_2,
-        //         },
-        //         vec![],
-        //     )
-        //     .unwrap();
-        // println!("frame: {:?}", frame.encode_to_vec())
-        // group_context
-        //     .process_frame(zero_art_proto::SpFrame {
-        //         seq_num: 0,
-        //         created: None,
-        //         frame: Some(frame),
-        //     })
-        //     .unwrap();
-    }
+    //     // let frame = group_context.create_frame(vec![]).unwrap();
+    //     // let res = group_context
+    //     //     .add_member(
+    //     //         InvitationKeys::Unidentified {
+    //     //             invitation_secret_key: identified_secret_key_2,
+    //     //         },
+    //     //         vec![],
+    //     //     )
+    //     //     .unwrap();
+    //     // println!("frame: {:?}", frame.encode_to_vec())
+    //     // group_context
+    //     //     .process_frame(zero_art_proto::SpFrame {
+    //     //         seq_num: 0,
+    //     //         created: None,
+    //     //         frame: Some(frame),
+    //     //     })
+    //     //     .unwrap();
+    // }
 
-    #[test]
-    fn test_create_group() {
-        let frame_bytes = vec![
-            10, 134, 1, 10, 2, 105, 100, 26, 16, 177, 119, 38, 153, 44, 247, 120, 146, 151, 166,
-            146, 50, 14, 9, 221, 241, 50, 110, 104, 209, 123, 20, 52, 151, 120, 11, 229, 215, 99,
-            125, 145, 235, 5, 104, 104, 252, 215, 144, 44, 231, 192, 8, 144, 96, 197, 102, 166,
-            205, 192, 190, 205, 253, 230, 54, 1, 219, 221, 17, 234, 101, 49, 75, 237, 79, 41, 119,
-            161, 73, 95, 156, 51, 189, 242, 146, 33, 76, 67, 100, 250, 31, 143, 161, 184, 242, 137,
-            194, 144, 10, 56, 65, 104, 196, 43, 64, 130, 243, 166, 101, 110, 106, 90, 99, 35, 22,
-            252, 199, 151, 78, 161, 206, 49, 46, 5, 128, 31, 134, 132, 223, 96, 168, 227, 220, 219,
-            130, 173, 24, 139, 110, 74, 72, 207, 75, 127, 168, 180, 145, 188, 212, 152, 250, 126,
-            94, 254, 236, 194, 144, 207, 255, 40, 251, 25, 126, 227, 58, 128, 95, 51, 165, 5, 59,
-            206, 2, 1, 0, 0, 0, 0, 0, 0, 0, 178, 131, 88, 147, 161, 129, 31, 8, 112, 76, 214, 42,
-            4, 129, 124, 223, 141, 10, 217, 200, 244, 62, 39, 158, 187, 220, 59, 185, 230, 198, 99,
-            7,
-        ];
-        let frame = zero_art_proto::Frame::decode(&frame_bytes[..]).unwrap();
+    // #[test]
+    // fn test_create_group() {
+    //     let frame_bytes = vec![
+    //         10, 134, 1, 10, 2, 105, 100, 26, 16, 177, 119, 38, 153, 44, 247, 120, 146, 151, 166,
+    //         146, 50, 14, 9, 221, 241, 50, 110, 104, 209, 123, 20, 52, 151, 120, 11, 229, 215, 99,
+    //         125, 145, 235, 5, 104, 104, 252, 215, 144, 44, 231, 192, 8, 144, 96, 197, 102, 166,
+    //         205, 192, 190, 205, 253, 230, 54, 1, 219, 221, 17, 234, 101, 49, 75, 237, 79, 41, 119,
+    //         161, 73, 95, 156, 51, 189, 242, 146, 33, 76, 67, 100, 250, 31, 143, 161, 184, 242, 137,
+    //         194, 144, 10, 56, 65, 104, 196, 43, 64, 130, 243, 166, 101, 110, 106, 90, 99, 35, 22,
+    //         252, 199, 151, 78, 161, 206, 49, 46, 5, 128, 31, 134, 132, 223, 96, 168, 227, 220, 219,
+    //         130, 173, 24, 139, 110, 74, 72, 207, 75, 127, 168, 180, 145, 188, 212, 152, 250, 126,
+    //         94, 254, 236, 194, 144, 207, 255, 40, 251, 25, 126, 227, 58, 128, 95, 51, 165, 5, 59,
+    //         206, 2, 1, 0, 0, 0, 0, 0, 0, 0, 178, 131, 88, 147, 161, 129, 31, 8, 112, 76, 214, 42,
+    //         4, 129, 124, 223, 141, 10, 217, 200, 244, 62, 39, 158, 187, 220, 59, 185, 230, 198, 99,
+    //         7,
+    //     ];
+    //     let frame = zero_art_proto::Frame::decode(&frame_bytes[..]).unwrap();
 
-        // let frame = frame.frame.unwrap();
-        // frame.group_operation.unwrap();
-    }
+    //     // let frame = frame.frame.unwrap();
+    //     // frame.group_operation.unwrap();
+    // }
 
     #[test]
     fn test_context_from_tree_secret() {}

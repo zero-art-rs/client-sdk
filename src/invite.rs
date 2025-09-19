@@ -33,15 +33,14 @@ impl Invite {
 
         // Verify invite signature
         let inviter_public_key =
-            CortadoAffine::deserialize_uncompressed(&invite.identity_public_key[..])?;
+        CortadoAffine::deserialize_uncompressed(&invite.identity_public_key[..])?;
         schnorr::verify(&signature, &vec![inviter_public_key], &invite_digest)?;
-
+        
         let ephemeral_public_key =
-            CortadoAffine::deserialize_uncompressed(&invite.ephemeral_public_key[..])?;
-
+        CortadoAffine::deserialize_uncompressed(&invite.ephemeral_public_key[..])?;
+        
         // Parse invitee keys
         let invitee = invite.invite.ok_or(SDKError::InvalidInput)?.try_into()?;
-
         // Verify if this is identified invite that secrets provided
         if let Invitee::Identified {
             identity_public_key,
@@ -51,7 +50,8 @@ impl Invite {
             if invitee_secrets.is_none() {
                 return Err(SDKError::InvalidInput);
             }
-
+            
+            
             let (identity_secret_key, spk_secret_key) = invitee_secrets.unwrap();
             let owned_identity_public_key =
                 (CortadoAffine::generator() * identity_secret_key).into_affine();
@@ -203,7 +203,7 @@ impl TryFrom<zero_art_proto::invite_tbs::Invite> for Invitee {
         match value {
             zero_art_proto::invite_tbs::Invite::IdentifiedInvite(inv) => {
                 let identity_public_key =
-                    CortadoAffine::deserialize_uncompressed(&inv.identity_public_key[..])?;
+                CortadoAffine::deserialize_uncompressed(&inv.identity_public_key[..])?;
                 let spk_public_key = if inv.spk_public_key.len() == 0 {
                     None
                 } else {
@@ -236,8 +236,11 @@ impl TryFrom<Invitee> for zero_art_proto::invite_tbs::Invite {
                 let mut identity_public_key_bytes = Vec::new();
                 identity_public_key.serialize_uncompressed(&mut identity_public_key_bytes)?;
 
+                
                 let mut spk_public_key_bytes = Vec::new();
-                spk_public_key.serialize_uncompressed(&mut spk_public_key_bytes)?;
+                if let Some(spk_public_key) = spk_public_key {
+                    spk_public_key.serialize_uncompressed(&mut spk_public_key_bytes)?;
+                }
 
                 Ok(zero_art_proto::invite_tbs::Invite::IdentifiedInvite(
                     zero_art_proto::IdentifiedInvite {
