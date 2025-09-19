@@ -453,8 +453,10 @@ impl GroupContext {
                     _ => unreachable!(),
                 };
 
+                println!("Process, Before STK: {:?}", self.stk);
                 self.art.update_private_art(&changes)?;
                 self.advance_epoch()?;
+                println!("Process, After STK: {:?}", self.stk);
 
                 frame.frame_tbs.decrypt(&self.stk)?;
 
@@ -859,8 +861,10 @@ impl GroupContext {
         // 1. Update own leaf with provided secret and recompute STK
         let old_secret = self.art.secret_key;
 
+        println!("Generate, Before STK: {:?}", self.stk);
         let (_, changes, artefacts) = self.art.update_key(&leaf_secret)?;
         self.advance_epoch()?;
+        println!("Generate, After STK: {:?}", self.stk);
 
         // 3. Create frame without encrypted payload
         let group_operation = builders::GroupOperationBuilder::new()
