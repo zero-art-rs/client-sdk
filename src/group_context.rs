@@ -454,9 +454,11 @@ impl GroupContext {
                 };
 
                 println!("Process, Before STK: {:?}", self.stk);
+                println!("Process, Before TK: {:?}", self.art.get_root_key());
                 self.art.update_private_art(&changes)?;
                 self.advance_epoch()?;
                 println!("Process, After STK: {:?}", self.stk);
+                println!("Process, After TK: {:?}", self.art.get_root_key());
 
                 frame.frame_tbs.decrypt(&self.stk)?;
 
@@ -862,9 +864,11 @@ impl GroupContext {
         let old_secret = self.art.secret_key;
 
         println!("Generate, Before STK: {:?}", self.stk);
+        println!("Generate, Before TK: {:?}", self.art.get_root_key());
         let (_, changes, artefacts) = self.art.update_key(&leaf_secret)?;
         self.advance_epoch()?;
         println!("Generate, After STK: {:?}", self.stk);
+        println!("Generate, After TK: {:?}", self.art.get_root_key());
 
         // 3. Create frame without encrypted payload
         let group_operation = builders::GroupOperationBuilder::new()
