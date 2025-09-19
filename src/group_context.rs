@@ -448,11 +448,13 @@ impl GroupContext {
 
                 println!("Process, Before STK: {:?}", self.stk);
                 println!("Process, Before TK: {:?}", self.art.get_root_key());
+                println!("Process, Before Root: {:?}", self.art.get_root());
                 println!("Process, Changes: {:?}", changes);
-                self.art.update_public_art(&changes)?;
+                self.art.update_private_art(&changes)?;
                 self.advance_epoch()?;
                 println!("Process, After STK: {:?}", self.stk);
                 println!("Process, After TK: {:?}", self.art.get_root_key());
+                println!("Process, After Root: {:?}", self.art.get_root());
 
                 frame.frame_tbs.decrypt(&self.stk)?;
 
@@ -860,10 +862,12 @@ impl GroupContext {
         println!("Generate, Before STK: {:?}", self.stk);
         println!("Generate, Before TK: {:?}", self.art.get_root_key());
         let (_, changes, artefacts) = self.art.update_key(&leaf_secret)?;
+        println!("Generate, Before Root: {:?}", self.art.get_root());
         println!("Generate, Changes: {:?}", changes);
         self.advance_epoch()?;
         println!("Generate, After STK: {:?}", self.stk);
         println!("Generate, After TK: {:?}", self.art.get_root_key());
+        println!("Generate, After Root: {:?}", self.art.get_root());
 
         let mut payload = frame::ProtectedPayload {
             protected_payload_tbs: frame::ProtectedPayloadTbs {
