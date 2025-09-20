@@ -1,6 +1,6 @@
 use ark_ec::{AffineRepr, CurveGroup};
-use ark_ff::{PrimeField, UniformRand};
-use ark_serialize::{CanonicalSerialize, serialize_to_vec};
+use ark_ff::PrimeField;
+use ark_serialize::serialize_to_vec;
 use art::traits::ARTPrivateAPI;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use crypto::{CryptoError, x3dh::x3dh_a};
@@ -8,20 +8,19 @@ use crypto::{CryptoError, x3dh::x3dh_a};
 use hkdf::Hkdf;
 use sha3::Sha3_256;
 
-use crate::group_context::InvitationKeys;
 use crate::invite;
 
 use aes_gcm::aead::{Aead, KeyInit, Nonce, Payload};
 use aes_gcm::{Aes256Gcm, Key};
 
-use super::{GroupContext, SDKError};
+use super::{Error, GroupContext};
 
 impl GroupContext {
-    pub fn encrypt(&self, plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, SDKError> {
+    pub fn encrypt(&self, plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, Error> {
         encrypt(&self.stk, plaintext, aad)
     }
 
-    pub fn decrypt(&self, ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>, SDKError> {
+    pub fn decrypt(&self, ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>, Error> {
         decrypt(&self.stk, ciphertext, aad)
     }
 
@@ -29,7 +28,7 @@ impl GroupContext {
         &self,
         ephemeral_secret_key: ScalarField,
         invitee: invite::Invitee,
-    ) -> Result<ScalarField, SDKError> {
+    ) -> Result<ScalarField, Error> {
         // Compute new member leaf secret
         let (identity_public_key, invitation_public_key) = match invitee {
             invite::Invitee::Identified {
@@ -57,7 +56,7 @@ impl GroupContext {
     /// Compute next STK and increment epoch
     ///
     /// Should be carefully used, because you can't move backward
-    pub(super) fn advance_epoch(&mut self) -> Result<(), SDKError> {
+    pub(super) fn advance_epoch(&mut self) -> Result<(), Error> {
         let tk = self.art.get_root_key()?;
         println!("inside tk: {:?}", tk);
 
@@ -82,7 +81,7 @@ pub fn hkdf(salt: Option<&[u8]>, ikm: &[u8]) -> Result<[u8; 32], CryptoError> {
     Ok(okm)
 }
 
-pub fn encrypt(stage_key: &[u8; 32], plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, SDKError> {
+pub fn encrypt(stage_key: &[u8; 32], plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, Error> {
     let h = Hkdf::<Sha3_256>::new(Some(b"encryption-key-derivation"), stage_key);
 
     // AES 256 key size - 32 bytes, nonce - 12 bytes
@@ -103,10 +102,10 @@ pub fn encrypt(stage_key: &[u8; 32], plaintext: &[u8], aad: &[u8]) -> Result<Vec
                 aad,
             },
         )
-        .map_err(|_| SDKError::AesError)
+        .map_err(|_| Error::AesError)
 }
 
-pub fn decrypt(stage_key: &[u8; 32], ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>, SDKError> {
+pub fn decrypt(stage_key: &[u8; 32], ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>, Error> {
     let h = Hkdf::<Sha3_256>::new(Some(b"encryption-key-derivation"), stage_key);
 
     // AES 256 key size - 32 bytes, nonce - 12 bytes
@@ -127,10 +126,10 @@ pub fn decrypt(stage_key: &[u8; 32], ciphertext: &[u8], aad: &[u8]) -> Result<Ve
                 aad,
             },
         )
-        .map_err(|_| SDKError::AesError)
+        .map_err(|_| Error::AesError)
 }
 
-pub fn derive_stage_key(stage_key: &[u8; 32], tree_key: ScalarField) -> Result<[u8; 32], SDKError> {
+pub fn derive_stage_key(stage_key: &[u8; 32], tree_key: ScalarField) -> Result<[u8; 32], Error> {
     // Recompute stk: stk(i+1) = HKDF( "stage-key-derivation", stk(i) || tk(i+1) )
     let stk = hkdf(
         Some(b"stage-key-derivation"),

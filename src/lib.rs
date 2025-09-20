@@ -1,10 +1,10 @@
 pub mod builders;
-pub mod frame;
 pub mod group_context;
 pub mod invite;
-pub mod metadata;
+pub mod models;
 pub mod proof_system;
 pub mod secrets_factory;
+pub mod utils;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right

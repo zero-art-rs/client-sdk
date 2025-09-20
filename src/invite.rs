@@ -8,8 +8,8 @@ use crypto::{schnorr, x3dh::x3dh_b};
 use prost::Message;
 use sha3::{Digest, Sha3_256};
 
-use crate::group_context::SDKError;
-use crate::{metadata, zero_art_proto};
+use crate::group_context::Error;
+use crate::{models, zero_art_proto};
 
 pub struct Invite {
     pub invitee: Invitee,
@@ -19,16 +19,16 @@ pub struct Invite {
     // protected_invite_data
     pub epoch: u64,
     pub stage_key: [u8; 32],
-    pub group_info: metadata::group::GroupInfo,
+    pub group_info: models::group_info::GroupInfo,
 }
 
 impl Invite {
     pub fn try_from(
         invite: zero_art_proto::Invite,
         invitee_secrets: Option<(ScalarField, Option<ScalarField>)>,
-    ) -> Result<(Self, ScalarField), SDKError> {
+    ) -> Result<(Self, ScalarField), Error> {
         let signature = invite.signature;
-        let invite = invite.invite.ok_or(SDKError::InvalidInput)?;
+        let invite = invite.invite.ok_or(Error::InvalidInput)?;
         let invite_digest = Sha3_256::digest(invite.encode_to_vec());
 
         // Verify invite signature
@@ -40,7 +40,7 @@ impl Invite {
             CortadoAffine::deserialize_uncompressed(&invite.ephemeral_public_key[..])?;
 
         // Parse invitee keys
-        let invitee = invite.invite.ok_or(SDKError::InvalidInput)?.try_into()?;
+        let invitee = invite.invite.ok_or(Error::InvalidInput)?.try_into()?;
         // Verify if this is identified invite that secrets provided
         if let Invitee::Identified {
             identity_public_key,
@@ -48,7 +48,7 @@ impl Invite {
         } = invitee
         {
             if invitee_secrets.is_none() {
-                return Err(SDKError::InvalidInput);
+                return Err(Error::InvalidInput);
             }
 
             let (identity_secret_key, spk_secret_key) = invitee_secrets.unwrap();
@@ -60,7 +60,7 @@ impl Invite {
             if owned_identity_public_key != identity_public_key
                 || owned_spk_public_key != spk_public_key
             {
-                return Err(SDKError::InvalidInput);
+                return Err(Error::InvalidInput);
             }
         };
 
@@ -98,7 +98,7 @@ impl Invite {
         let epoch = invite_data.epoch;
         let group_info = invite_data
             .group_info
-            .ok_or(SDKError::InvalidInput)?
+            .ok_or(Error::InvalidInput)?
             .try_into()?;
 
         Ok((
@@ -118,7 +118,7 @@ impl Invite {
         mut self,
         inviter_secret_key: ScalarField,
         ephemeral_secret_key: ScalarField,
-    ) -> Result<zero_art_proto::Invite, SDKError> {
+    ) -> Result<zero_art_proto::Invite, Error> {
         let inviter_public_key = (CortadoAffine::generator() * inviter_secret_key).into_affine();
         let ephemeral_public_key =
             (CortadoAffine::generator() * ephemeral_secret_key).into_affine();
@@ -196,7 +196,7 @@ pub enum Invitee {
 }
 
 impl TryFrom<zero_art_proto::invite_tbs::Invite> for Invitee {
-    type Error = SDKError;
+    type Error = Error;
 
     fn try_from(value: zero_art_proto::invite_tbs::Invite) -> Result<Self, Self::Error> {
         match value {
@@ -224,7 +224,7 @@ impl TryFrom<zero_art_proto::invite_tbs::Invite> for Invitee {
 }
 
 impl TryFrom<Invitee> for zero_art_proto::invite_tbs::Invite {
-    type Error = SDKError;
+    type Error = Error;
 
     fn try_from(value: Invitee) -> Result<Self, Self::Error> {
         match value {
