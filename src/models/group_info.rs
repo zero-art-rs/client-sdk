@@ -138,6 +138,8 @@ pub struct User {
     pub metadata: Vec<u8>,
     // ?: Should we create separate enum?
     pub role: zero_art_proto::Role,
+    // // For user
+    // pub leaf_public_key: Option<CortadoAffine>
 }
 
 impl User {

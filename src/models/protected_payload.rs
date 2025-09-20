@@ -1,5 +1,9 @@
+use ark_ec::{AffineRepr, CurveGroup};
 use chrono::{DateTime, Utc};
+use cortado::{self, CortadoAffine, Fr as ScalarField};
+use crypto::schnorr;
 use prost::Message;
+use sha3::Digest;
 
 use crate::{
     models::{errors::Error, payload::Payload},
@@ -8,8 +12,45 @@ use crate::{
 
 #[derive(Debug, Clone, Default)]
 pub struct ProtectedPayload {
-    pub protected_payload_tbs: ProtectedPayloadTbs,
-    pub signature: Vec<u8>,
+    protected_payload_tbs: ProtectedPayloadTbs,
+    signature: Vec<u8>,
+}
+
+impl ProtectedPayload {
+    pub fn new(protected_payload_tbs: ProtectedPayloadTbs, signature: Vec<u8>) -> Self {
+        Self {
+            protected_payload_tbs,
+            signature,
+        }
+    }
+
+    // Getters
+    pub fn protected_payload_tbs(&self) -> &ProtectedPayloadTbs {
+        &self.protected_payload_tbs
+    }
+
+    pub fn signature(&self) -> &[u8] {
+        &self.signature
+    }
+
+    // Verify signature
+    pub fn verify<D: Digest>(&self, public_key: CortadoAffine) -> Result<(), crypto::CryptoError> {
+        schnorr::verify(
+            &self.signature,
+            &vec![public_key],
+            &D::digest(self.protected_payload_tbs.encode_to_vec()),
+        )
+    }
+
+    // Serialization
+    pub fn encode_to_vec(&self) -> Vec<u8> {
+        let inner: zero_art_proto::ProtectedPayload = self.clone().into();
+        inner.encode_to_vec()
+    }
+
+    pub fn decode(data: &[u8]) -> Result<Self, Error> {
+        zero_art_proto::ProtectedPayload::decode(data)?.try_into()
+    }
 }
 
 impl TryFrom<zero_art_proto::ProtectedPayload> for ProtectedPayload {
@@ -39,20 +80,70 @@ impl From<ProtectedPayload> for zero_art_proto::ProtectedPayload {
 
 #[derive(Debug, Clone, Default)]
 pub struct ProtectedPayloadTbs {
-    pub seq_num: u64,
-    pub created: DateTime<Utc>,
-    pub payloads: Vec<Payload>,
-    pub sender: Sender,
+    seq_num: u64,
+    created: DateTime<Utc>,
+    payloads: Vec<Payload>,
+    sender: Sender,
 }
 
 impl ProtectedPayloadTbs {
+    pub fn new(
+        seq_num: u64,
+        created: DateTime<Utc>,
+        payloads: Vec<Payload>,
+        sender: Sender,
+    ) -> Self {
+        Self {
+            seq_num,
+            created,
+            payloads,
+            sender,
+        }
+    }
+
+    // Getters
+    pub fn sqe_num(&self) -> u64 {
+        self.seq_num
+    }
+
+    // TODO: Check if DateTime<Utc> implements Copy
+    pub fn created(&self) -> &DateTime<Utc> {
+        &self.created
+    }
+
+    pub fn payloads(&self) -> &[Payload] {
+        &self.payloads
+    }
+
+    pub fn sender(&self) -> &Sender {
+        &self.sender
+    }
+
+    // Sign payload and return ProtectedPayload
+    pub fn sign<D: Digest>(
+        self,
+        secret_key: ScalarField,
+    ) -> Result<ProtectedPayload, crypto::CryptoError> {
+        let public_key = (CortadoAffine::generator() * secret_key).into_affine();
+        let signature = schnorr::sign(
+            &vec![secret_key],
+            &vec![public_key],
+            &D::digest(self.encode_to_vec()),
+        )?;
+        Ok(ProtectedPayload {
+            protected_payload_tbs: self,
+            signature: signature,
+        })
+    }
+
+    // Serialization
     pub fn encode_to_vec(&self) -> Vec<u8> {
         let inner: zero_art_proto::ProtectedPayloadTbs = self.clone().into();
         inner.encode_to_vec()
     }
 
-    pub fn decode(data: Vec<u8>) -> Result<Self, Error> {
-        zero_art_proto::ProtectedPayloadTbs::decode(&data[..])?.try_into()
+    pub fn decode(data: &[u8]) -> Result<Self, Error> {
+        zero_art_proto::ProtectedPayloadTbs::decode(data)?.try_into()
     }
 }
 

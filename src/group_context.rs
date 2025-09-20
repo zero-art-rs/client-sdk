@@ -200,6 +200,7 @@ impl GroupContext {
         let (mut invite, invite_leaf_secret) =
             invite::Invite::try_from(invite, Some((identity_secret_key, spk_secret_key)))?;
         let art: PrivateART<CortadoAffine> = PrivateART::deserialize(&art, &invite_leaf_secret)?;
+
         let context_rng = StdRng::from_rng(thread_rng()).unwrap();
 
         user.public_key = identity_key_pair.public_key;
@@ -231,15 +232,15 @@ impl GroupContext {
         sp_frame: zero_art_proto::SpFrame,
     ) -> Result<Vec<models::payload::Payload>, Error> {
         let frame = sp_frame.frame.ok_or(Error::InvalidInput)?;
-        let mut frame = models::frame::Frame::try_from(frame)?;
+        let frame = models::frame::Frame::try_from(frame)?;
         // Validate that frame belong to this group
-        let group_id = frame.frame_tbs.group_id;
+        let group_id = frame.frame_tbs().group_id();
         if group_id != self.group_info.id {
             return Err(Error::InvalidInput);
         }
 
-        let epoch = frame.frame_tbs.epoch;
-        if frame.frame_tbs.group_operation.is_none() {
+        let epoch = frame.frame_tbs().epoch();
+        if frame.frame_tbs().group_operation().is_none() {
             if self.epoch == epoch {
                 return Err(Error::InvalidInput);
             }
@@ -247,25 +248,15 @@ impl GroupContext {
             let tk = self.art.get_root_key()?;
             let tree_public_key = (tk.generator * tk.key).into_affine();
 
-            match frame.proof {
-                models::frame::Proof::SchnorrSignature(signature) => {
-                    schnorr::verify(
-                        &signature,
-                        &vec![tree_public_key],
-                        &Sha3_256::digest(frame.frame_tbs.encode_to_vec()?),
-                    )?;
-                }
-                _ => unreachable!(),
-            }
+            frame.verify_schnorr::<Sha3_256>(tree_public_key)?;
 
-            frame.frame_tbs.decrypt(&self.stk)?;
+            let protected_payload =
+                models::protected_payload::ProtectedPayload::decode(&self.decrypt(
+                    frame.frame_tbs().protected_payload(),
+                    &frame.frame_tbs().associated_data::<Sha3_256>()?,
+                )?)?;
 
-            let payload = &frame
-                .frame_tbs
-                .decrypted_payload
-                .ok_or(Error::InvalidInput)?;
-
-            let sender = match payload.protected_payload_tbs.sender.clone() {
+            let sender = match protected_payload.protected_payload_tbs().sender() {
                 models::protected_payload::Sender::UserId(id) => self
                     .group_info
                     .members
@@ -274,91 +265,73 @@ impl GroupContext {
                 _ => unimplemented!(),
             };
 
-            schnorr::verify(
-                &payload.signature,
-                &vec![sender.public_key],
-                &Sha3_256::digest(payload.protected_payload_tbs.encode_to_vec()),
-            )?;
+            protected_payload.verify::<Sha3_256>(sender.public_key)?;
 
             if sender.public_key == self.identity_key_pair.public_key {
                 return Ok(vec![]);
             }
 
-            return Ok(payload.protected_payload_tbs.payloads.clone());
+            return Ok(protected_payload
+                .protected_payload_tbs()
+                .payloads()
+                .to_vec());
         }
 
-        match frame.frame_tbs.group_operation.clone().unwrap() {
+        match frame.frame_tbs().group_operation().unwrap() {
             models::frame::GroupOperation::Init(_) => {
-                if frame.frame_tbs.epoch != 0 {
+                if frame.frame_tbs().epoch() != 0 {
                     return Ok(vec![]);
                 }
 
                 let owner_public_key =
-                    CortadoAffine::deserialize_uncompressed(&frame.frame_tbs.nonce[..])?;
+                    CortadoAffine::deserialize_uncompressed(frame.frame_tbs().nonce())?;
 
-                match frame.proof {
-                    models::frame::Proof::SchnorrSignature(signature) => {
-                        schnorr::verify(
-                            &signature,
-                            &vec![owner_public_key],
-                            &Sha3_256::digest(frame.frame_tbs.encode_to_vec()?),
-                        )?;
-                    }
-                    _ => unreachable!(),
-                }
+                frame.verify_schnorr::<Sha3_256>(owner_public_key)?;
 
                 if owner_public_key == self.identity_key_pair.public_key {
                     return Ok(vec![]);
                 }
 
-                frame.frame_tbs.decrypt(&self.stk)?;
+                let protected_payload =
+                    models::protected_payload::ProtectedPayload::decode(&self.decrypt(
+                        frame.frame_tbs().protected_payload(),
+                        &frame.frame_tbs().associated_data::<Sha3_256>()?,
+                    )?)?;
 
-                let payload = &frame
-                    .frame_tbs
-                    .decrypted_payload
-                    .ok_or(Error::InvalidInput)?;
-                schnorr::verify(
-                    &payload.signature,
-                    &vec![owner_public_key],
-                    &Sha3_256::digest(payload.protected_payload_tbs.encode_to_vec()),
-                )?;
+                protected_payload.verify::<Sha3_256>(owner_public_key)?;
 
-                return Ok(payload.protected_payload_tbs.payloads.clone());
+                return Ok(protected_payload
+                    .protected_payload_tbs()
+                    .payloads()
+                    .to_vec());
             }
             models::frame::GroupOperation::AddMember(changes) => {
-                if self.epoch == frame.frame_tbs.epoch {
+                if self.epoch == frame.frame_tbs().epoch() {
                     return Ok(vec![]);
                 }
-                if self.epoch + 1 != frame.frame_tbs.epoch {
+                if self.epoch + 1 != frame.frame_tbs().epoch() {
                     return Err(Error::InvalidInput);
                 }
 
-                let verification_artefacts =
-                    self.art.compute_artefacts_for_verification(&changes)?;
+                let verifier_artefacts = self.art.compute_artefacts_for_verification(&changes)?;
                 let owner_leaf_public_key = self.group_owner_leaf_public_key()?;
-                match frame.proof {
-                    models::frame::Proof::ArtProof(art_proof) => {
-                        self.proof_system.verify(
-                            verification_artefacts,
-                            &vec![owner_leaf_public_key],
-                            &Sha3_256::digest(frame.frame_tbs.encode_to_vec()?),
-                            art_proof,
-                        )?;
-                    }
-                    _ => unreachable!(),
-                };
+
+                frame.verify_art::<Sha3_256>(
+                    &self.proof_system,
+                    verifier_artefacts,
+                    owner_leaf_public_key,
+                )?;
 
                 self.art.update_private_art(&changes)?;
                 self.advance_epoch()?;
 
-                frame.frame_tbs.decrypt(&self.stk)?;
+                let protected_payload =
+                    models::protected_payload::ProtectedPayload::decode(&self.decrypt(
+                        frame.frame_tbs().protected_payload(),
+                        &frame.frame_tbs().associated_data::<Sha3_256>()?,
+                    )?)?;
 
-                let payload = &frame
-                    .frame_tbs
-                    .decrypted_payload
-                    .ok_or(Error::InvalidInput)?;
-
-                let sender = match payload.protected_payload_tbs.sender.clone() {
+                let sender = match protected_payload.protected_payload_tbs().sender() {
                     models::protected_payload::Sender::UserId(id) => self
                         .group_info
                         .members
@@ -367,58 +340,54 @@ impl GroupContext {
                     _ => unimplemented!(),
                 };
 
-                schnorr::verify(
-                    &payload.signature,
-                    &vec![sender.public_key],
-                    &Sha3_256::digest(payload.protected_payload_tbs.encode_to_vec()),
-                )?;
+                protected_payload.verify::<Sha3_256>(sender.public_key)?;
 
-                return Ok(payload.protected_payload_tbs.payloads.clone());
+                return Ok(protected_payload
+                    .protected_payload_tbs()
+                    .payloads()
+                    .to_vec());
             }
             models::frame::GroupOperation::KeyUpdate(changes) => {
-                if self.epoch == frame.frame_tbs.epoch {
+                if self.epoch == frame.frame_tbs().epoch() {
                     return Ok(vec![]);
                 }
-                if self.epoch + 1 != frame.frame_tbs.epoch {
+                if self.epoch + 1 != frame.frame_tbs().epoch() {
                     return Err(Error::InvalidInput);
                 }
 
-                let verification_artefacts =
-                    self.art.compute_artefacts_for_verification(&changes)?;
+                let verifier_artefacts = self.art.compute_artefacts_for_verification(&changes)?;
 
                 let old_leaf_public_key = self.art.get_node(&changes.node_index)?.public_key;
-                match frame.proof {
-                    models::frame::Proof::ArtProof(art_proof) => {
-                        self.proof_system.verify(
-                            verification_artefacts,
-                            &vec![old_leaf_public_key],
-                            &Sha3_256::digest(frame.frame_tbs.encode_to_vec()?),
-                            art_proof,
-                        )?;
-                    }
-                    _ => unreachable!(),
-                };
+                frame.verify_art::<Sha3_256>(
+                    &self.proof_system,
+                    verifier_artefacts,
+                    old_leaf_public_key,
+                )?;
 
-                println!("Process, Before STK: {:?}", self.stk);
-                println!("Process, Before TK: {:?}", self.art.get_root_key());
-                println!("Process, Before Root: {:?}", self.art.get_root());
-                println!("Process, Changes: {:?}", changes);
+                println!();
+                println!();
+                println!("Process frame before ART: {:?}", self.art.get_root());
+                println!("Process frame before TK: {:?}", self.art.get_root_key());
+                println!("Process frame before STK: {:?}", self.stk);
                 self.art.update_private_art(&changes)?;
                 self.advance_epoch()?;
-                println!("Process, After STK: {:?}", self.stk);
-                println!("Process, After TK: {:?}", self.art.get_root_key());
-                println!("Process, After Root: {:?}", self.art.get_root());
 
-                frame.frame_tbs.decrypt(&self.stk)?;
+                println!();
+                println!("Changes: {:?}", changes);
+                println!("Process frame after ART: {:?}", self.art.get_root());
+                println!("Process frame after TK: {:?}", self.art.get_root_key());
+                println!("Process frame after STK: {:?}", self.stk);
+                println!();
+                println!();
+                let protected_payload =
+                    models::protected_payload::ProtectedPayload::decode(&self.decrypt(
+                        frame.frame_tbs().protected_payload(),
+                        &frame.frame_tbs().associated_data::<Sha3_256>()?,
+                    )?)?;
 
-                let payload = &frame
-                    .frame_tbs
-                    .decrypted_payload
-                    .ok_or(Error::InvalidInput)?;
-
-                let new_users: Vec<models::group_info::User> = payload
-                    .protected_payload_tbs
-                    .payloads
+                let new_users: Vec<models::group_info::User> = protected_payload
+                    .protected_payload_tbs()
+                    .payloads()
                     .iter()
                     .filter_map(|payload| match payload {
                         models::payload::Payload::Action(action) => match action {
@@ -436,7 +405,7 @@ impl GroupContext {
                     group_info.members.add_user(user);
                 }
 
-                let sender = match payload.protected_payload_tbs.sender.clone() {
+                let sender = match protected_payload.protected_payload_tbs().sender() {
                     models::protected_payload::Sender::UserId(id) => group_info
                         .members
                         .get_by_id(&id)
@@ -444,15 +413,14 @@ impl GroupContext {
                     _ => unimplemented!(),
                 };
 
-                schnorr::verify(
-                    &payload.signature,
-                    &vec![sender.public_key],
-                    &Sha3_256::digest(payload.protected_payload_tbs.encode_to_vec()),
-                )?;
+                protected_payload.verify::<Sha3_256>(sender.public_key)?;
 
                 self.group_info = group_info;
 
-                return Ok(payload.protected_payload_tbs.payloads.clone());
+                return Ok(protected_payload
+                    .protected_payload_tbs()
+                    .payloads()
+                    .to_vec());
             }
             _ => unimplemented!(),
         }
@@ -472,8 +440,11 @@ impl GroupContext {
         let leaf_secret = self.compute_member_leaf_secret(ephemeral_secret_key, invitee)?;
 
         // 3. Add node to ART and advance epoch
-        let (_, changes, artefacts) = self.art.append_or_replace_node(&leaf_secret)?;
+        let (_, changes, prover_artefacts) = self.art.append_or_replace_node(&leaf_secret)?;
         self.advance_epoch()?;
+        println!("Add member after ART: {:?}", self.art.get_root());
+        println!("Add member after TK: {:?}", self.art.get_root_key());
+        println!("Add member after STK: {:?}", self.stk);
 
         // 4. Add payload with group info
         payloads.push(models::payload::Payload::Action(
@@ -481,54 +452,57 @@ impl GroupContext {
         ));
 
         // 5. Construct payload
-        let mut payload = models::protected_payload::ProtectedPayload {
-            protected_payload_tbs: models::protected_payload::ProtectedPayloadTbs {
-                seq_num: 0,
-                created: Utc::now(),
-                payloads: payloads,
-                sender: models::protected_payload::Sender::UserId(
-                    self.group_info
-                        .members
-                        .get_by_public_key(&self.identity_key_pair.public_key)
-                        .ok_or(Error::InvalidInput)?
-                        .id
-                        .clone(),
-                ),
-            },
-            signature: Vec::new(),
-        };
+        // let mut payload = models::protected_payload::ProtectedPayload {
+        //     protected_payload_tbs: models::protected_payload::ProtectedPayloadTbs {
+        //         seq_num: 0,
+        //         created: Utc::now(),
+        //         payloads: payloads,
+        //         sender: models::protected_payload::Sender::UserId(
+        //             self.group_info
+        //                 .members
+        //                 .get_by_public_key(&self.identity_key_pair.public_key)
+        //                 .ok_or(Error::InvalidInput)?
+        //                 .id
+        //                 .clone(),
+        //         ),
+        //     },
+        //     signature: Vec::new(),
+        // };
 
-        // 6. Sign payload
-        let signature = schnorr::sign(
-            &vec![self.identity_key_pair.secret_key],
-            &vec![self.identity_key_pair.public_key],
-            &Sha3_256::digest(payload.protected_payload_tbs.encode_to_vec()),
+        let protected_payload_tbs = models::protected_payload::ProtectedPayloadTbs::new(
+            0,
+            Utc::now(),
+            payloads,
+            models::protected_payload::Sender::UserId(
+                self.group_info
+                    .members
+                    .get_by_public_key(&self.identity_key_pair.public_key)
+                    .ok_or(Error::InvalidInput)?
+                    .id
+                    .clone(),
+            ),
+        );
+        let protected_payload =
+            protected_payload_tbs.sign::<Sha3_256>(self.identity_key_pair.secret_key)?;
+
+        let mut frame_tbs = models::frame::FrameTbs::new(
+            self.group_info.id,
+            self.epoch,
+            vec![],
+            Some(models::frame::GroupOperation::AddMember(changes)),
+            vec![],
+        );
+        let protected_payload = self.encrypt(
+            &protected_payload.encode_to_vec(),
+            &frame_tbs.associated_data::<Sha3_256>()?,
         )?;
-        payload.signature = signature;
+        frame_tbs.set_protected_payload(protected_payload);
 
-        // 7. Construct frame
-        let mut frame = models::frame::Frame {
-            frame_tbs: models::frame::FrameTbs {
-                group_id: self.group_info.id.clone(),
-                epoch: self.epoch,
-                nonce: vec![],
-                group_operation: Some(models::frame::GroupOperation::AddMember(changes)),
-                protected_payload: Vec::new(),
-                decrypted_payload: Some(payload),
-            },
-            proof: models::frame::Proof::default(),
-        };
-
-        // 8. Encrypt payload
-        frame.frame_tbs.encrypt(&self.stk)?;
-
-        // 9. Prove ART changes
-        let proof = self.proof_system.prove(
-            artefacts,
-            &vec![self.art.secret_key],
-            &Sha3_256::digest(frame.frame_tbs.encode_to_vec()?),
+        let frame = frame_tbs.prove_art::<Sha3_256>(
+            &mut self.proof_system,
+            prover_artefacts,
+            self.art.secret_key,
         )?;
-        frame.proof = models::frame::Proof::ArtProof(proof);
 
         // 10. Create and Sign invite
         let invite = invite::Invite {
@@ -777,62 +751,57 @@ impl GroupContext {
         // 1. Update own leaf with provided secret and recompute STK
         let old_secret = self.art.secret_key;
 
-        println!("Generate, Before STK: {:?}", self.stk);
-        println!("Generate, Before TK: {:?}", self.art.get_root_key());
-        let (_, changes, artefacts) = self.art.update_key(&leaf_secret)?;
-        println!("Generate, Before Root: {:?}", self.art.get_root());
-        println!("Generate, Changes: {:?}", changes);
+        println!();
+        println!();
+        println!("Key update before ART: {:?}", self.art.get_root());
+        println!("Key update before TK: {:?}", self.art.get_root_key());
+        println!("Key update before STK: {:?}", self.stk);
+        let (_, changes, prover_artefacts) = self.art.update_key(&leaf_secret)?;
         self.advance_epoch()?;
-        println!("Generate, After STK: {:?}", self.stk);
-        println!("Generate, After TK: {:?}", self.art.get_root_key());
-        println!("Generate, After Root: {:?}", self.art.get_root());
+        println!();
+        println!("Changes: {:?}", changes);
+        println!("Key update after ART: {:?}", self.art.get_root());
+        println!("Key update after TK: {:?}", self.art.get_root_key());
+        println!("Key update after STK: {:?}", self.stk);
+        println!();
+        println!();
 
-        let mut payload = models::protected_payload::ProtectedPayload {
-            protected_payload_tbs: models::protected_payload::ProtectedPayloadTbs {
-                seq_num: 0,
-                created: Utc::now(),
-                payloads: payloads,
-                sender: models::protected_payload::Sender::UserId(
-                    self.group_info
-                        .members
-                        .get_by_public_key(&self.identity_key_pair.public_key)
-                        .ok_or(Error::InvalidInput)?
-                        .id
-                        .clone(),
-                ),
-            },
-            signature: Vec::new(),
-        };
+        let protected_payload_tbs = models::protected_payload::ProtectedPayloadTbs::new(
+            0,
+            Utc::now(),
+            payloads,
+            models::protected_payload::Sender::UserId(
+                self.group_info
+                    .members
+                    .get_by_public_key(&self.identity_key_pair.public_key)
+                    .ok_or(Error::InvalidInput)?
+                    .id
+                    .clone(),
+            ),
+        );
+        let protected_payload =
+            protected_payload_tbs.sign::<Sha3_256>(self.identity_key_pair.secret_key)?;
 
-        let signature = schnorr::sign(
-            &vec![self.identity_key_pair.secret_key],
-            &vec![self.identity_key_pair.public_key],
-            &Sha3_256::digest(payload.protected_payload_tbs.encode_to_vec()),
+        let mut frame_tbs = models::frame::FrameTbs::new(
+            self.group_info.id,
+            self.epoch,
+            vec![],
+            Some(models::frame::GroupOperation::KeyUpdate(changes)),
+            vec![],
+        );
+        let protected_payload = self.encrypt(
+            &protected_payload.encode_to_vec(),
+            &frame_tbs.associated_data::<Sha3_256>()?,
         )?;
-        payload.signature = signature;
+        frame_tbs.set_protected_payload(protected_payload);
 
-        let mut frame = models::frame::Frame {
-            frame_tbs: models::frame::FrameTbs {
-                group_id: self.group_info.id.clone(),
-                epoch: self.epoch,
-                nonce: vec![],
-                group_operation: Some(models::frame::GroupOperation::KeyUpdate(changes)),
-                protected_payload: Vec::new(),
-                decrypted_payload: Some(payload),
-            },
-            proof: models::frame::Proof::default(),
-        };
-        frame.frame_tbs.encrypt(&self.stk)?;
-
-        // Prove changes
-        let proof = self.proof_system.prove(
-            artefacts,
-            &vec![old_secret],
-            &Sha3_256::digest(frame.frame_tbs.encode_to_vec()?),
-        )?;
-        frame.proof = models::frame::Proof::ArtProof(proof);
-
-        Ok(frame)
+        Ok(
+            frame_tbs.prove_art::<Sha3_256>(
+                &mut self.proof_system,
+                prover_artefacts,
+                old_secret,
+            )?,
+        )
     }
 
     fn group_owner_leaf_public_key(&self) -> Result<CortadoAffine, Error> {
@@ -1020,7 +989,162 @@ mod tests {
     }
 
     #[test]
-    fn test_context_from_tree_secret() {}
+    fn test_create_new_group_2() {
+        // Use determined seed for reproducability
+        let mut rng = StdRng::seed_from_u64(0);
+
+        let mut secrets_factory_seed = [0u8; 32];
+        rng.fill(&mut secrets_factory_seed);
+
+        let mut secrets_factory = secrets_factory::SecretsFactory::new(secrets_factory_seed);
+
+        // Predefined key pairs
+        let mut key_pairs = Vec::new();
+        for _ in 0..20 {
+            key_pairs.push(secrets_factory.generate_secret_with_public_key());
+        }
+
+        let owner_user = models::group_info::User::new(
+            String::from("owner_id_1"),
+            String::from("owner"),
+            vec![],
+        );
+        let group_info = models::group_info::GroupInfo::new(
+            Uuid::parse_str("123e4567-e89b-12d3-a456-426655440000").unwrap(),
+            String::from("group_1"),
+            vec![],
+        );
+
+        let mut context_seed = [0u8; 32];
+        rng.fill(&mut context_seed);
+
+        let mut proof_system_seed = [0u8; 32];
+        rng.fill(&mut proof_system_seed);
+
+        let result = group_context::builder::GroupContextBuilder::new(key_pairs[0].1)
+            .context_prng_seed(context_seed)
+            .proof_system_prng_seed(proof_system_seed)
+            .create(owner_user, group_info)
+            .unidentified_members_count(1)
+            .payloads(vec![])
+            .build();
+        assert!(result.is_ok(), "Failed to create group context");
+
+        let (mut group_context, init_frame, identified_invites, unidentified_invites) =
+            result.unwrap();
+
+        let (invite_public_key_1, invite_secret_key_1) = key_pairs[1];
+
+        // Invite unidentified member
+        // let (frame, invite) = group_context
+        //     .add_member(invite::Invitee::Unidentified(invite_secret_key_1), vec![])
+        //     .unwrap();
+
+        // let (frame, invite) = group_context
+        //     .add_member(
+        //         invite::Invitee::Identified {
+        //             identity_public_key: key_pairs[0].0,
+        //             spk_public_key: None,
+        //         },
+        //         vec![],
+        //     )
+        //     .unwrap();
+
+        let (frame, invite) = group_context
+            .add_member(
+                invite::Invitee::Identified {
+                    identity_public_key: key_pairs[1].0,
+                    spk_public_key: None,
+                },
+                vec![],
+            )
+            .unwrap();
+
+        let public_art_bytes = group_context.art.serialize().unwrap();
+
+        let user_1 =
+            models::group_info::User::new(String::from("user_id_2"), String::from("user"), vec![]);
+        let (mut secondary_group_context, join_group_frame) =
+            GroupContext::from_invite(key_pairs[1].1, None, public_art_bytes, invite, user_1)
+                .unwrap();
+
+        group_context
+            .process_frame(zero_art_proto::SpFrame {
+                seq_num: 0,
+                created: None,
+                frame: Some(join_group_frame.try_into().unwrap()),
+            })
+            .unwrap();
+
+        // let (leaf_secret, art, stk, epoch, group_info) = group_context.into_parts().unwrap();
+        // let leaf_secret = ScalarField::deserialize_uncompressed(&leaf_secret[..]).unwrap();
+        // let group_info = zero_art_proto::GroupInfo::decode(&group_info[..]).unwrap();
+        // let mut group_context = GroupContext::from_parts(
+        //     key_pairs[0].1,
+        //     leaf_secret,
+        //     &art,
+        //     stk.try_into().unwrap(),
+        //     epoch,
+        //     0,
+        //     group_info.try_into().unwrap(),
+        // )
+        // .unwrap();
+
+        // group_context
+        //     .process_frame(zero_art_proto::SpFrame {
+        //         seq_num: 0,
+        //         created: None,
+        //         frame: Some(join_group_frame.try_into().unwrap()),
+        //     })
+        //     .unwrap();
+
+        // let payloads = secondary_group_context
+        //     .process_frame(zero_art_proto::SpFrame {
+        //         seq_num: 0,
+        //         created: None,
+        //         frame: Some(join_group_frame),
+        //     })
+        //     .unwrap();
+        // assert_eq!(payloads.len(), 0);
+    }
+
+    #[test]
+    fn test_context_from_tree_secret() {
+        let mut rng = StdRng::seed_from_u64(0);
+        let secret_key_0 = ScalarField::rand(&mut rng);
+        // let secret_key_1 = ScalarField::rand(&mut rng);
+
+        let (mut private_art_0, _) =
+            PrivateART::new_art_from_secrets(&vec![secret_key_0], &CortadoAffine::generator())
+                .unwrap();
+
+        let secret_key_2 = ScalarField::rand(&mut rng);
+        private_art_0.append_or_replace_node(&secret_key_2).unwrap();
+
+        let public_art_bytes = private_art_0.serialize().unwrap();
+
+        let mut private_art_1: PrivateART<CortadoAffine> =
+            PrivateART::deserialize(&public_art_bytes, &secret_key_2).unwrap();
+        let secret_key_3 = ScalarField::rand(&mut rng);
+
+        let (tk, changes, _) = private_art_1.update_key(&secret_key_3).unwrap();
+        println!("tk_1: {:?}", private_art_1.get_root_key());
+        println!();
+        println!("art_1: {}", private_art_1.get_root());
+
+        println!();
+        private_art_0.update_private_art(&changes).unwrap();
+        println!("tk_0: {:?}", private_art_0.get_root_key());
+        println!();
+        println!("art_0: {}", private_art_0.get_root());
+        println!();
+
+        assert_eq!(private_art_0.get_root(), private_art_1.get_root());
+        // assert_eq!(
+        //     private_art_1.get_root_key().unwrap(),
+        //     private_art_0.get_root_key().unwrap()
+        // );
+    }
 
     #[test]
     fn test_context_from_invite() {}

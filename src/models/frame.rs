@@ -1,30 +1,78 @@
+use ark_ec::{AffineRepr, CurveGroup};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use art::types::{BranchChanges, PublicART};
-use cortado::CortadoAffine;
+use art::types::{BranchChanges, ProverArtefacts, PublicART, VerifierArtefacts};
+use cortado::{self, CortadoAffine, Fr as ScalarField};
+use crypto::schnorr;
 use prost::Message;
 use sha3::{Digest, Sha3_256};
+
 use uuid::Uuid;
 use zk::art::ARTProof;
 
-use crate::{
-    models::{errors::Error, protected_payload::ProtectedPayload},
-    utils, zero_art_proto,
-};
+use crate::{models::errors::Error, proof_system, zero_art_proto};
 
 #[derive(Clone, Default)]
 pub struct Frame {
-    pub frame_tbs: FrameTbs,
-    pub proof: Proof,
+    frame_tbs: FrameTbs,
+    proof: Proof,
 }
 
 impl Frame {
+    pub fn new(frame_tbs: FrameTbs, proof: Proof) -> Self {
+        Self { frame_tbs, proof }
+    }
+
+    // Getters
+    pub fn frame_tbs(&self) -> &FrameTbs {
+        &self.frame_tbs
+    }
+
+    pub fn proof(&self) -> &Proof {
+        &self.proof
+    }
+
+    pub fn verify_schnorr<D: Digest>(&self, public_key: CortadoAffine) -> Result<(), Error> {
+        match &self.proof {
+            Proof::SchnorrSignature(signature) => {
+                schnorr::verify(
+                    signature,
+                    &vec![public_key],
+                    &D::digest(self.frame_tbs.encode_to_vec()?),
+                )?;
+            }
+            Proof::ArtProof(_) => return Err(Error::InvalidVerificationMethod),
+        }
+
+        Ok(())
+    }
+
+    pub fn verify_art<D: Digest>(
+        &self,
+        proof_system: &proof_system::ProofSystem,
+        verifier_artefacts: VerifierArtefacts<CortadoAffine>,
+        public_key: CortadoAffine,
+    ) -> Result<(), Error> {
+        match &self.proof {
+            Proof::SchnorrSignature(_) => return Err(Error::InvalidVerificationMethod),
+            Proof::ArtProof(proof) => proof_system.verify(
+                verifier_artefacts,
+                &vec![public_key],
+                &D::digest(self.frame_tbs.encode_to_vec()?),
+                proof.clone(),
+            )?,
+        }
+
+        Ok(())
+    }
+
+    // Serialization
     pub fn encode_to_vec(&self) -> Result<Vec<u8>, Error> {
         let inner: zero_art_proto::Frame = self.clone().try_into()?;
         Ok(inner.encode_to_vec())
     }
 
-    pub fn decode(data: Vec<u8>) -> Result<Self, Error> {
-        zero_art_proto::Frame::decode(&data[..])?.try_into()
+    pub fn decode(data: &[u8]) -> Result<Self, Error> {
+        zero_art_proto::Frame::decode(data)?.try_into()
     }
 }
 
@@ -89,53 +137,100 @@ impl Default for Proof {
 
 #[derive(Debug, Clone, Default)]
 pub struct FrameTbs {
-    pub group_id: Uuid,
-    pub epoch: u64,
-    pub nonce: Vec<u8>,
-    pub group_operation: Option<GroupOperation>,
-
-    pub protected_payload: Vec<u8>,
-    pub decrypted_payload: Option<ProtectedPayload>,
+    group_id: Uuid,
+    epoch: u64,
+    nonce: Vec<u8>,
+    group_operation: Option<GroupOperation>,
+    protected_payload: Vec<u8>,
 }
 
 impl FrameTbs {
-    pub fn decrypt(&mut self, stage_key: &[u8; 32]) -> Result<(), Error> {
-        // TODO: may be we should store inner
-        let mut inner: zero_art_proto::FrameTbs = self.clone().try_into()?;
-        std::mem::take(&mut inner.protected_payload);
-        let associated_data = Sha3_256::digest(inner.encode_to_vec());
-
-        let payload_bytes = utils::decrypt(stage_key, &self.protected_payload, &associated_data)?;
-        let payload = zero_art_proto::ProtectedPayload::decode(&payload_bytes[..])?;
-        self.decrypted_payload = Some(payload.try_into()?);
-
-        Ok(())
+    pub fn new(
+        group_id: Uuid,
+        epoch: u64,
+        nonce: Vec<u8>,
+        group_operation: Option<GroupOperation>,
+        protected_payload: Vec<u8>,
+    ) -> Self {
+        Self {
+            group_id,
+            epoch,
+            nonce,
+            group_operation,
+            protected_payload,
+        }
     }
 
-    pub fn encrypt(&mut self, stage_key: &[u8; 32]) -> Result<(), Error> {
-        // TODO: may be we should store inner
-        let mut inner: zero_art_proto::FrameTbs = self.clone().try_into()?;
-        std::mem::take(&mut inner.protected_payload);
-        let associated_data = Sha3_256::digest(inner.encode_to_vec());
-
-        let payload: zero_art_proto::ProtectedPayload = self
-            .decrypted_payload
-            .clone()
-            .ok_or(Error::RequiredFieldAbsent)?
-            .into();
-        let payload_bytes = payload.encode_to_vec();
-        self.protected_payload = utils::encrypt(stage_key, &payload_bytes, &associated_data)?;
-
-        Ok(())
+    // Getters
+    pub fn group_id(&self) -> Uuid {
+        self.group_id
     }
 
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    pub fn nonce(&self) -> &[u8] {
+        &self.nonce
+    }
+
+    pub fn group_operation(&self) -> Option<&GroupOperation> {
+        self.group_operation.as_ref()
+    }
+
+    pub fn protected_payload(&self) -> &[u8] {
+        &self.protected_payload
+    }
+
+    pub fn set_protected_payload(&mut self, protected_payload: Vec<u8>) {
+        let _ = std::mem::replace(&mut self.protected_payload, protected_payload);
+    }
+
+    // Associated data for authenticate with aes_gcm
+    pub fn associated_data<D: Digest>(&self) -> Result<Vec<u8>, Error> {
+        let mut inner: zero_art_proto::FrameTbs = self.clone().try_into()?;
+        std::mem::take(&mut inner.protected_payload);
+        Ok(Sha3_256::digest(inner.encode_to_vec()).to_vec())
+    }
+
+    pub fn prove_schnorr<D: Digest>(self, secret_key: ScalarField) -> Result<Frame, Error> {
+        let public_key = (CortadoAffine::generator() * secret_key).into_affine();
+        let signature = schnorr::sign(
+            &vec![secret_key],
+            &vec![public_key],
+            &D::digest(self.encode_to_vec()?),
+        )?;
+        Ok(Frame {
+            frame_tbs: self,
+            proof: Proof::SchnorrSignature(signature),
+        })
+    }
+
+    pub fn prove_art<D: Digest>(
+        self,
+        proof_system: &mut proof_system::ProofSystem,
+        prover_artefacts: ProverArtefacts<CortadoAffine>,
+        secret_key: ScalarField,
+    ) -> Result<Frame, Error> {
+        let proof = proof_system.prove(
+            prover_artefacts,
+            &vec![secret_key],
+            &D::digest(self.encode_to_vec()?),
+        )?;
+        Ok(Frame {
+            frame_tbs: self,
+            proof: Proof::ArtProof(proof),
+        })
+    }
+
+    // Serialization
     pub fn encode_to_vec(&self) -> Result<Vec<u8>, Error> {
         let inner: zero_art_proto::FrameTbs = self.clone().try_into()?;
         Ok(inner.encode_to_vec())
     }
 
-    pub fn decode(data: Vec<u8>) -> Result<Self, Error> {
-        zero_art_proto::FrameTbs::decode(&data[..])?.try_into()
+    pub fn decode(data: &[u8]) -> Result<Self, Error> {
+        zero_art_proto::FrameTbs::decode(data)?.try_into()
     }
 }
 
@@ -157,7 +252,6 @@ impl TryFrom<zero_art_proto::FrameTbs> for FrameTbs {
             nonce: value.nonce,
             group_operation,
             protected_payload: value.protected_payload,
-            decrypted_payload: None,
         })
     }
 }
