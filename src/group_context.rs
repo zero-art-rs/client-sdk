@@ -242,7 +242,7 @@ impl GroupContext {
         let epoch = frame.frame_tbs().epoch();
         if frame.frame_tbs().group_operation().is_none() {
             if self.epoch == epoch {
-                return Err(Error::InvalidInput);
+                return Err(Error::InvalidEpoch);
             }
 
             let tk = self.art.get_root_key()?;
@@ -306,11 +306,11 @@ impl GroupContext {
                     .to_vec());
             }
             models::frame::GroupOperation::AddMember(changes) => {
-                if self.epoch == frame.frame_tbs().epoch() {
+                if self.epoch <= frame.frame_tbs().epoch() {
                     return Ok(vec![]);
                 }
                 if self.epoch + 1 != frame.frame_tbs().epoch() {
-                    return Err(Error::InvalidInput);
+                    return Err(Error::InvalidEpoch);
                 }
 
                 let verifier_artefacts = self.art.compute_artefacts_for_verification(&changes)?;
@@ -348,11 +348,11 @@ impl GroupContext {
                     .to_vec());
             }
             models::frame::GroupOperation::KeyUpdate(changes) => {
-                if self.epoch == frame.frame_tbs().epoch() {
+                if self.epoch <= frame.frame_tbs().epoch() {
                     return Ok(vec![]);
                 }
                 if self.epoch + 1 != frame.frame_tbs().epoch() {
-                    return Err(Error::InvalidInput);
+                    return Err(Error::InvalidEpoch);
                 }
 
                 let verifier_artefacts = self.art.compute_artefacts_for_verification(&changes)?;
