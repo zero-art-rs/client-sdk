@@ -27,6 +27,7 @@ use static_assertions::assert_impl_all;
 use zk::art::{ARTProof, art_prove};
 
 use crate::group_context::utils::{decrypt, derive_stage_key, encrypt};
+use crate::models::group_info::GroupInfo;
 use crate::{
     builders,
     proof_system::ProofSystem,
@@ -138,6 +139,10 @@ impl GroupContext {
 
     pub fn get_epoch(&self) -> u64 {
         self.epoch
+    }
+
+    pub fn get_group_info(&self) -> &GroupInfo {
+        &self.group_info
     }
 
     pub fn into_parts(self) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, u64, Vec<u8>), Error> {
