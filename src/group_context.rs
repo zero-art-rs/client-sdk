@@ -246,7 +246,7 @@ impl GroupContext {
 
         let epoch = frame.frame_tbs().epoch();
         if frame.frame_tbs().group_operation().is_none() {
-            if self.epoch == epoch {
+            if self.epoch != epoch {
                 return Err(Error::InvalidEpoch);
             }
 
