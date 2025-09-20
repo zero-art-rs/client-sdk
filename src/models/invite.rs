@@ -12,11 +12,76 @@ use sha3::{Digest, Sha3_256};
 
 use crate::{models, zero_art_proto};
 
+pub struct Invite {
+    invite_tbs: InviteTbs,
+    signature: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
 pub struct InviteTbs {
     invitee: Invitee,
-    identity_public_key: CortadoAffine,
-    ephemral_public_key: CortadoAffine,
+    inviter_public_key: CortadoAffine,
+    ephemeral_public_key: CortadoAffine,
     protected_invite_data: Vec<u8>,
+}
+
+impl InviteTbs {
+    pub fn new(
+        invitee: Invitee,
+        inviter_public_key: CortadoAffine,
+        ephemeral_public_key: CortadoAffine,
+        protected_invite_data: Vec<u8>,
+    ) -> Self {
+        Self {
+            invitee,
+            inviter_public_key,
+            ephemeral_public_key,
+            protected_invite_data,
+        }
+    }
+}
+
+impl TryFrom<zero_art_proto::InviteTbs> for InviteTbs {
+    type Error = Error;
+
+    fn try_from(value: zero_art_proto::InviteTbs) -> Result<Self, Self::Error> {
+        let inviter_public_key =
+            CortadoAffine::deserialize_uncompressed(&value.identity_public_key[..])?;
+        let ephemeral_public_key =
+            CortadoAffine::deserialize_uncompressed(&value.ephemeral_public_key[..])?;
+        Ok(Self {
+            invitee: value
+                .invite
+                .ok_or(Error::InvalidVerificationMethod)?
+                .try_into()?,
+            inviter_public_key,
+            ephemeral_public_key,
+            protected_invite_data: value.protected_invite_data,
+        })
+    }
+}
+
+impl TryFrom<InviteTbs> for zero_art_proto::InviteTbs {
+    type Error = Error;
+
+    fn try_from(value: InviteTbs) -> Result<Self, Self::Error> {
+        let mut inviter_public_key_bytes = Vec::new();
+        value
+            .inviter_public_key
+            .serialize_uncompressed(&mut inviter_public_key_bytes)?;
+
+        let mut ephemeral_public_key_bytes = Vec::new();
+        value
+            .ephemeral_public_key
+            .serialize_uncompressed(&mut ephemeral_public_key_bytes)?;
+
+        Ok(Self {
+            protected_invite_data: value.protected_invite_data,
+            identity_public_key: inviter_public_key_bytes,
+            ephemeral_public_key: ephemeral_public_key_bytes,
+            invite: Some(value.invitee.try_into()?),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -27,7 +92,6 @@ pub enum Invitee {
     },
     Unidentified(ScalarField),
 }
-
 
 impl TryFrom<zero_art_proto::invite_tbs::Invite> for Invitee {
     type Error = Error;
@@ -95,11 +159,44 @@ impl TryFrom<Invitee> for zero_art_proto::invite_tbs::Invite {
     }
 }
 
-
+#[derive(Debug, Clone)]
 pub struct ProtectedInviteData {
     epoch: u64,
     stage_key: [u8; 32],
     group_info: GroupInfo,
+}
+
+impl ProtectedInviteData {
+    pub fn new(epoch: u64, stage_key: [u8; 32], group_info: GroupInfo) -> Self {
+        Self {
+            epoch,
+            stage_key,
+            group_info,
+        }
+    }
+
+    // Getters
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    pub fn stage_key(&self) -> [u8; 32] {
+        self.stage_key
+    }
+
+    pub fn group_info(&self) -> &GroupInfo {
+        &self.group_info
+    }
+
+    // Serialization
+    pub fn encode_to_vec(&self) -> Result<Vec<u8>, Error> {
+        let inner: zero_art_proto::ProtectedInviteData = self.clone().into();
+        Ok(inner.encode_to_vec())
+    }
+
+    pub fn decode(data: &[u8]) -> Result<Self, Error> {
+        zero_art_proto::ProtectedInviteData::decode(data)?.try_into()
+    }
 }
 
 impl TryFrom<zero_art_proto::ProtectedInviteData> for ProtectedInviteData {

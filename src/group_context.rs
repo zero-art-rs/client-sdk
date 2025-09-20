@@ -306,7 +306,7 @@ impl GroupContext {
                     .to_vec());
             }
             models::frame::GroupOperation::AddMember(changes) => {
-                if self.epoch <= frame.frame_tbs().epoch() {
+                if self.epoch >= frame.frame_tbs().epoch() {
                     return Ok(vec![]);
                 }
                 if self.epoch + 1 != frame.frame_tbs().epoch() {
@@ -348,7 +348,7 @@ impl GroupContext {
                     .to_vec());
             }
             models::frame::GroupOperation::KeyUpdate(changes) => {
-                if self.epoch <= frame.frame_tbs().epoch() {
+                if self.epoch >= frame.frame_tbs().epoch() {
                     return Ok(vec![]);
                 }
                 if self.epoch + 1 != frame.frame_tbs().epoch() {
@@ -1068,13 +1068,19 @@ mod tests {
             GroupContext::from_invite(key_pairs[1].1, None, public_art_bytes, invite, user_1)
                 .unwrap();
 
-        group_context
+        println!("Frame epocch: {}", join_group_frame.frame_tbs().epoch());
+
+        println!("Epoch: {}", group_context.epoch);
+        let paylaods = group_context
             .process_frame(zero_art_proto::SpFrame {
                 seq_num: 0,
                 created: None,
                 frame: Some(join_group_frame.try_into().unwrap()),
             })
             .unwrap();
+
+        println!("Epoch: {}", group_context.epoch);
+        assert!(paylaods.len() != 0);
 
         // let (leaf_secret, art, stk, epoch, group_info) = group_context.into_parts().unwrap();
         // let leaf_secret = ScalarField::deserialize_uncompressed(&leaf_secret[..]).unwrap();
