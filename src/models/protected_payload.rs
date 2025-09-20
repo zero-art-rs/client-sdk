@@ -4,9 +4,11 @@ use cortado::{self, CortadoAffine, Fr as ScalarField};
 use crypto::schnorr;
 use prost::Message;
 use sha3::Digest;
+use uuid::Uuid;
 
 use crate::{
-    models::{errors::Error, payload::Payload},
+    error::{Error, Result},
+    models::payload::Payload,
     zero_art_proto,
 };
 
@@ -34,12 +36,12 @@ impl ProtectedPayload {
     }
 
     // Verify signature
-    pub fn verify<D: Digest>(&self, public_key: CortadoAffine) -> Result<(), crypto::CryptoError> {
-        schnorr::verify(
+    pub fn verify<D: Digest>(&self, public_key: CortadoAffine) -> Result<()> {
+        Ok(schnorr::verify(
             &self.signature,
             &vec![public_key],
             &D::digest(self.protected_payload_tbs.encode_to_vec()),
-        )
+        )?)
     }
 
     // Serialization
@@ -48,7 +50,7 @@ impl ProtectedPayload {
         inner.encode_to_vec()
     }
 
-    pub fn decode(data: &[u8]) -> Result<Self, Error> {
+    pub fn decode(data: &[u8]) -> Result<Self> {
         zero_art_proto::ProtectedPayload::decode(data)?.try_into()
     }
 }
@@ -56,7 +58,7 @@ impl ProtectedPayload {
 impl TryFrom<zero_art_proto::ProtectedPayload> for ProtectedPayload {
     type Error = Error;
 
-    fn try_from(value: zero_art_proto::ProtectedPayload) -> Result<Self, Self::Error> {
+    fn try_from(value: zero_art_proto::ProtectedPayload) -> Result<Self> {
         let protected_payload_tbs = value
             .payload
             .ok_or(Error::RequiredFieldAbsent)?
@@ -120,10 +122,7 @@ impl ProtectedPayloadTbs {
     }
 
     // Sign payload and return ProtectedPayload
-    pub fn sign<D: Digest>(
-        self,
-        secret_key: ScalarField,
-    ) -> Result<ProtectedPayload, crypto::CryptoError> {
+    pub fn sign<D: Digest>(self, secret_key: ScalarField) -> Result<ProtectedPayload> {
         let public_key = (CortadoAffine::generator() * secret_key).into_affine();
         let signature = schnorr::sign(
             &vec![secret_key],
@@ -142,7 +141,7 @@ impl ProtectedPayloadTbs {
         inner.encode_to_vec()
     }
 
-    pub fn decode(data: &[u8]) -> Result<Self, Error> {
+    pub fn decode(data: &[u8]) -> Result<Self> {
         zero_art_proto::ProtectedPayloadTbs::decode(data)?.try_into()
     }
 }
@@ -150,7 +149,7 @@ impl ProtectedPayloadTbs {
 impl TryFrom<zero_art_proto::ProtectedPayloadTbs> for ProtectedPayloadTbs {
     type Error = Error;
 
-    fn try_from(value: zero_art_proto::ProtectedPayloadTbs) -> Result<Self, Self::Error> {
+    fn try_from(value: zero_art_proto::ProtectedPayloadTbs) -> Result<Self> {
         let timestamp_proto = value.created.ok_or(Error::RequiredFieldAbsent)?;
         let created =
             DateTime::from_timestamp(timestamp_proto.seconds, timestamp_proto.nanos as u32)
@@ -160,7 +159,7 @@ impl TryFrom<zero_art_proto::ProtectedPayloadTbs> for ProtectedPayloadTbs {
             .payload
             .into_iter()
             .map(Payload::try_from)
-            .collect::<Result<Vec<Payload>, Self::Error>>()?;
+            .collect::<Result<Vec<Payload>>>()?;
 
         Ok(Self {
             seq_num: value.seq_num,
@@ -194,20 +193,23 @@ impl From<ProtectedPayloadTbs> for zero_art_proto::ProtectedPayloadTbs {
 
 #[derive(Debug, Clone)]
 pub enum Sender {
-    UserId(String),
+    UserId(Uuid),
     LeafId(String),
 }
 
 impl Default for Sender {
     fn default() -> Self {
-        Sender::UserId(String::default())
+        Sender::UserId(Uuid::default())
     }
 }
 
 impl From<zero_art_proto::protected_payload_tbs::Sender> for Sender {
     fn from(value: zero_art_proto::protected_payload_tbs::Sender) -> Self {
         match value {
-            zero_art_proto::protected_payload_tbs::Sender::UserId(id) => Sender::UserId(id),
+            // TODO: Remove expect
+            zero_art_proto::protected_payload_tbs::Sender::UserId(id) => {
+                Sender::UserId(Uuid::parse_str(&id).expect("Expected user id as uuid"))
+            }
             zero_art_proto::protected_payload_tbs::Sender::LeafId(id) => Sender::LeafId(id),
         }
     }
@@ -216,7 +218,9 @@ impl From<zero_art_proto::protected_payload_tbs::Sender> for Sender {
 impl From<Sender> for zero_art_proto::protected_payload_tbs::Sender {
     fn from(value: Sender) -> Self {
         match value {
-            Sender::UserId(id) => zero_art_proto::protected_payload_tbs::Sender::UserId(id),
+            Sender::UserId(id) => {
+                zero_art_proto::protected_payload_tbs::Sender::UserId(id.to_string())
+            }
             Sender::LeafId(id) => zero_art_proto::protected_payload_tbs::Sender::LeafId(id),
         }
     }

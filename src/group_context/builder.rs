@@ -271,8 +271,8 @@ impl CreateGroupContextBuilder {
         // 8. Form initial metadata
         let mut user = self.user;
         let mut group_info = self.group_info;
-        user.public_key = identity_public_key;
-        group_info.members.add_user(user);
+        *user.public_key_mut() = identity_public_key;
+        group_info.members_mut().add_user(user);
 
         // 9. Build group context
         let mut group_context = GroupContext {

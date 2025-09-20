@@ -1,35 +1,80 @@
-use crate::{models::errors::Error, zero_art_proto};
+use crate::{
+    error::{Error, Result},
+    zero_art_proto,
+};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use chrono::{DateTime, Utc};
 use cortado::CortadoAffine;
+use prost::Message;
 use std::collections::HashMap;
 use uuid::Uuid;
 
 #[derive(Debug, Default, Clone)]
 pub struct GroupInfo {
-    pub id: Uuid,
-    pub name: String,
-    pub created: DateTime<Utc>,
-    pub metadata: Vec<u8>,
-    pub members: GroupMembers,
+    id: Uuid,
+    name: String,
+    created: DateTime<Utc>,
+    metadata: Vec<u8>,
+    members: GroupMembers,
 }
 
 impl GroupInfo {
-    pub fn new(id: Uuid, name: String, metadata: Vec<u8>) -> Self {
+    pub fn new(
+        id: Uuid,
+        name: String,
+        created: DateTime<Utc>,
+        metadata: Vec<u8>,
+        members: GroupMembers,
+    ) -> Self {
         Self {
             id,
             name,
-            created: Utc::now(),
+            created,
             metadata,
-            members: GroupMembers::default(),
+            members,
         }
+    }
+
+    // Getters
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn created(&self) -> &DateTime<Utc> {
+        &self.created
+    }
+
+    pub fn metadata(&self) -> &[u8] {
+        &self.metadata
+    }
+
+    pub fn members(&self) -> &GroupMembers {
+        &self.members
+    }
+
+    pub fn members_mut(&mut self) -> &mut GroupMembers {
+        &mut self.members
+    }
+
+    // Serialization
+    pub fn encode_to_vec(&self) -> Vec<u8> {
+        let inner: zero_art_proto::GroupInfo = self.clone().into();
+        inner.encode_to_vec()
+    }
+
+    pub fn decode(data: &[u8]) -> Result<Self> {
+        zero_art_proto::GroupInfo::decode(data)?.try_into()
     }
 }
 
 impl TryFrom<zero_art_proto::GroupInfo> for GroupInfo {
     type Error = Error;
 
-    fn try_from(value: zero_art_proto::GroupInfo) -> Result<Self, Self::Error> {
+    fn try_from(value: zero_art_proto::GroupInfo) -> Result<Self> {
         let timestamp_proto = value.created.ok_or(Error::RequiredFieldAbsent)?;
         let created =
             DateTime::from_timestamp(timestamp_proto.seconds, timestamp_proto.nanos as u32)
@@ -62,8 +107,8 @@ impl From<GroupInfo> for zero_art_proto::GroupInfo {
 
 #[derive(Debug, Default, Clone)]
 pub struct GroupMembers {
-    by_id: HashMap<String, User>,
-    by_public_key: HashMap<CortadoAffine, String>,
+    by_id: HashMap<Uuid, User>,
+    by_public_key: HashMap<CortadoAffine, Uuid>,
 }
 
 impl GroupMembers {
@@ -74,7 +119,7 @@ impl GroupMembers {
         self.by_id.insert(id, user);
     }
 
-    pub fn remove_by_id(&mut self, id: &str) -> Option<User> {
+    pub fn remove_by_id(&mut self, id: &Uuid) -> Option<User> {
         if let Some(user) = self.by_id.remove(id) {
             self.by_public_key.remove(&user.public_key);
             Some(user)
@@ -87,7 +132,7 @@ impl GroupMembers {
         self.by_id.len()
     }
 
-    pub fn get_by_id(&self, id: &str) -> Option<&User> {
+    pub fn get_by_id(&self, id: &Uuid) -> Option<&User> {
         self.by_id.get(id)
     }
 
@@ -105,14 +150,14 @@ impl GroupMembers {
         self.by_id.values_mut()
     }
 
-    pub fn iter_with_ids(&self) -> impl Iterator<Item = (&String, &User)> {
+    pub fn iter_with_ids(&self) -> impl Iterator<Item = (&Uuid, &User)> {
         self.by_id.iter()
     }
 }
 
 impl TryFrom<Vec<zero_art_proto::User>> for GroupMembers {
     type Error = Error;
-    fn try_from(value: Vec<zero_art_proto::User>) -> Result<Self, Self::Error> {
+    fn try_from(value: Vec<zero_art_proto::User>) -> Result<Self> {
         let mut members = GroupMembers::default();
 
         for proto_user in value {
@@ -132,36 +177,76 @@ impl From<GroupMembers> for Vec<zero_art_proto::User> {
 
 #[derive(Debug, Clone, Default)]
 pub struct User {
-    pub id: String,
-    pub name: String,
-    pub public_key: CortadoAffine,
-    pub metadata: Vec<u8>,
+    id: Uuid,
+    name: String,
+    public_key: CortadoAffine,
+    metadata: Vec<u8>,
     // ?: Should we create separate enum?
-    pub role: zero_art_proto::Role,
-    // // For user
-    // pub leaf_public_key: Option<CortadoAffine>
+    role: zero_art_proto::Role,
 }
 
 impl User {
-    pub fn new(id: String, name: String, metadata: Vec<u8>) -> Self {
+    pub fn new(
+        id: Uuid,
+        name: String,
+        public_key: CortadoAffine,
+        metadata: Vec<u8>,
+        role: zero_art_proto::Role,
+    ) -> Self {
         Self {
             id,
             name,
+            public_key,
             metadata,
-            ..Self::default()
+            role,
         }
+    }
+
+    // Getters
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn public_key(&self) -> CortadoAffine {
+        self.public_key
+    }
+
+    pub fn public_key_mut(&mut self) -> &mut CortadoAffine {
+        &mut self.public_key
+    }
+
+    pub fn metadata(&self) -> &[u8] {
+        &self.metadata
+    }
+
+    pub fn role(&self) -> zero_art_proto::Role {
+        self.role
+    }
+
+    // Serialization
+    pub fn encode_to_vec(&self) -> Vec<u8> {
+        let inner: zero_art_proto::User = self.clone().into();
+        inner.encode_to_vec()
+    }
+
+    pub fn decode(data: &[u8]) -> Result<Self> {
+        zero_art_proto::User::decode(data)?.try_into()
     }
 }
 
 impl TryFrom<zero_art_proto::User> for User {
     type Error = Error;
 
-    fn try_from(value: zero_art_proto::User) -> Result<Self, Self::Error> {
+    fn try_from(value: zero_art_proto::User) -> Result<Self> {
         let public_key = CortadoAffine::deserialize_uncompressed(&value.public_key[..])?;
         let role = zero_art_proto::Role::try_from(value.role)?;
 
         Ok(Self {
-            id: value.id,
+            id: Uuid::parse_str(&value.id).map_err(|_| Error::RequiredFieldAbsent)?,
             name: value.name,
             public_key,
             metadata: value.picture,
@@ -179,7 +264,7 @@ impl From<User> for zero_art_proto::User {
             .unwrap();
 
         Self {
-            id: value.id,
+            id: value.id.to_string(),
             name: value.name,
             public_key: public_key_bytes,
             picture: value.metadata,

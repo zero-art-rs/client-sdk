@@ -8,7 +8,7 @@ use crypto::{schnorr, x3dh::x3dh_b};
 use prost::Message;
 use sha3::{Digest, Sha3_256};
 
-use crate::group_context::Error;
+use crate::error::{Error, Result};
 use crate::{models, zero_art_proto};
 
 pub struct Invite {
@@ -26,7 +26,7 @@ impl Invite {
     pub fn try_from(
         invite: zero_art_proto::Invite,
         invitee_secrets: Option<(ScalarField, Option<ScalarField>)>,
-    ) -> Result<(Self, ScalarField), Error> {
+    ) -> Result<(Self, ScalarField)> {
         let signature = invite.signature;
         let invite = invite.invite.ok_or(Error::InvalidInput)?;
         let invite_digest = Sha3_256::digest(invite.encode_to_vec());
@@ -118,7 +118,7 @@ impl Invite {
         mut self,
         inviter_secret_key: ScalarField,
         ephemeral_secret_key: ScalarField,
-    ) -> Result<zero_art_proto::Invite, Error> {
+    ) -> Result<zero_art_proto::Invite> {
         let inviter_public_key = (CortadoAffine::generator() * inviter_secret_key).into_affine();
         let ephemeral_public_key =
             (CortadoAffine::generator() * ephemeral_secret_key).into_affine();
@@ -198,7 +198,7 @@ pub enum Invitee {
 impl TryFrom<zero_art_proto::invite_tbs::Invite> for Invitee {
     type Error = Error;
 
-    fn try_from(value: zero_art_proto::invite_tbs::Invite) -> Result<Self, Self::Error> {
+    fn try_from(value: zero_art_proto::invite_tbs::Invite) -> Result<Self> {
         match value {
             zero_art_proto::invite_tbs::Invite::IdentifiedInvite(inv) => {
                 let identity_public_key =
@@ -226,7 +226,7 @@ impl TryFrom<zero_art_proto::invite_tbs::Invite> for Invitee {
 impl TryFrom<Invitee> for zero_art_proto::invite_tbs::Invite {
     type Error = Error;
 
-    fn try_from(value: Invitee) -> Result<Self, Self::Error> {
+    fn try_from(value: Invitee) -> Result<Self> {
         match value {
             Invitee::Identified {
                 identity_public_key,

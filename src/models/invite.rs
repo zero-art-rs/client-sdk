@@ -1,5 +1,7 @@
-use crate::models::errors::Error;
-use crate::models::group_info::GroupInfo;
+use crate::{
+    error::{Error, Result},
+    models::group_info::GroupInfo,
+};
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
@@ -32,13 +34,22 @@ impl Invite {
         &self.signature
     }
 
+    // Verify signature
+    pub fn verify<D: Digest>(&self, public_key: CortadoAffine) -> Result<()> {
+        Ok(schnorr::verify(
+            &self.signature,
+            &vec![public_key],
+            &D::digest(self.invite_tbs.encode_to_vec()?),
+        )?)
+    }
+
     // Serialization
-    pub fn encode_to_vec(&self) -> Result<Vec<u8>, Error> {
+    pub fn encode_to_vec(&self) -> Result<Vec<u8>> {
         let inner: zero_art_proto::Invite = self.clone().try_into()?;
         Ok(inner.encode_to_vec())
     }
 
-    pub fn decode(data: &[u8]) -> Result<Self, Error> {
+    pub fn decode(data: &[u8]) -> Result<Self> {
         zero_art_proto::Invite::decode(data)?.try_into()
     }
 }
@@ -46,7 +57,7 @@ impl Invite {
 impl TryFrom<zero_art_proto::Invite> for Invite {
     type Error = Error;
 
-    fn try_from(value: zero_art_proto::Invite) -> Result<Self, Self::Error> {
+    fn try_from(value: zero_art_proto::Invite) -> Result<Self> {
         Ok(Self {
             invite_tbs: value.invite.ok_or(Error::RequiredFieldAbsent)?.try_into()?,
             signature: value.signature,
@@ -57,7 +68,7 @@ impl TryFrom<zero_art_proto::Invite> for Invite {
 impl TryFrom<Invite> for zero_art_proto::Invite {
     type Error = Error;
 
-    fn try_from(value: Invite) -> Result<Self, Self::Error> {
+    fn try_from(value: Invite) -> Result<Self> {
         Ok(Self {
             invite: Some(value.invite_tbs.try_into()?),
             signature: value.signature,
@@ -106,7 +117,7 @@ impl InviteTbs {
     }
 
     // Sign payload and return ProtectedPayload
-    pub fn sign<D: Digest>(self, secret_key: ScalarField) -> Result<Invite, Error> {
+    pub fn sign<D: Digest>(self, secret_key: ScalarField) -> Result<Invite> {
         let public_key = (CortadoAffine::generator() * secret_key).into_affine();
         let signature = schnorr::sign(
             &vec![secret_key],
@@ -120,12 +131,12 @@ impl InviteTbs {
     }
 
     // Serialization
-    pub fn encode_to_vec(&self) -> Result<Vec<u8>, Error> {
+    pub fn encode_to_vec(&self) -> Result<Vec<u8>> {
         let inner: zero_art_proto::InviteTbs = self.clone().try_into()?;
         Ok(inner.encode_to_vec())
     }
 
-    pub fn decode(data: &[u8]) -> Result<Self, Error> {
+    pub fn decode(data: &[u8]) -> Result<Self> {
         zero_art_proto::InviteTbs::decode(data)?.try_into()
     }
 }
@@ -133,7 +144,7 @@ impl InviteTbs {
 impl TryFrom<zero_art_proto::InviteTbs> for InviteTbs {
     type Error = Error;
 
-    fn try_from(value: zero_art_proto::InviteTbs) -> Result<Self, Self::Error> {
+    fn try_from(value: zero_art_proto::InviteTbs) -> Result<Self> {
         let inviter_public_key =
             CortadoAffine::deserialize_uncompressed(&value.identity_public_key[..])?;
         let ephemeral_public_key =
@@ -153,7 +164,7 @@ impl TryFrom<zero_art_proto::InviteTbs> for InviteTbs {
 impl TryFrom<InviteTbs> for zero_art_proto::InviteTbs {
     type Error = Error;
 
-    fn try_from(value: InviteTbs) -> Result<Self, Self::Error> {
+    fn try_from(value: InviteTbs) -> Result<Self> {
         let mut inviter_public_key_bytes = Vec::new();
         value
             .inviter_public_key
@@ -185,7 +196,7 @@ pub enum Invitee {
 impl TryFrom<zero_art_proto::invite_tbs::Invite> for Invitee {
     type Error = Error;
 
-    fn try_from(value: zero_art_proto::invite_tbs::Invite) -> Result<Self, Self::Error> {
+    fn try_from(value: zero_art_proto::invite_tbs::Invite) -> Result<Self> {
         match value {
             zero_art_proto::invite_tbs::Invite::IdentifiedInvite(inv) => {
                 let identity_public_key =
@@ -213,7 +224,7 @@ impl TryFrom<zero_art_proto::invite_tbs::Invite> for Invitee {
 impl TryFrom<Invitee> for zero_art_proto::invite_tbs::Invite {
     type Error = Error;
 
-    fn try_from(value: Invitee) -> Result<Self, Self::Error> {
+    fn try_from(value: Invitee) -> Result<Self> {
         match value {
             Invitee::Identified {
                 identity_public_key,
@@ -278,12 +289,12 @@ impl ProtectedInviteData {
     }
 
     // Serialization
-    pub fn encode_to_vec(&self) -> Result<Vec<u8>, Error> {
+    pub fn encode_to_vec(&self) -> Result<Vec<u8>> {
         let inner: zero_art_proto::ProtectedInviteData = self.clone().into();
         Ok(inner.encode_to_vec())
     }
 
-    pub fn decode(data: &[u8]) -> Result<Self, Error> {
+    pub fn decode(data: &[u8]) -> Result<Self> {
         zero_art_proto::ProtectedInviteData::decode(data)?.try_into()
     }
 }
@@ -291,7 +302,7 @@ impl ProtectedInviteData {
 impl TryFrom<zero_art_proto::ProtectedInviteData> for ProtectedInviteData {
     type Error = Error;
 
-    fn try_from(value: zero_art_proto::ProtectedInviteData) -> Result<Self, Self::Error> {
+    fn try_from(value: zero_art_proto::ProtectedInviteData) -> Result<Self> {
         Ok(Self {
             epoch: value.epoch,
             stage_key: value
