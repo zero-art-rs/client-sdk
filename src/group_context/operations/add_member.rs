@@ -29,6 +29,7 @@ impl GroupContext {
         let (_, changes, prover_artefacts) = self.art.append_or_replace_node(&leaf_secret)?;
         self.advance_epoch()?;
 
+        // Control order to able to remove users by identity public key
         self.reorder_members();
 
         // 4. Add payload with group info
@@ -45,6 +46,7 @@ impl GroupContext {
             )?;
 
         let invite = self.create_invite(invitee, leaf_secret, ephemeral_secret_key)?;
+        self.is_last_sender = true;
 
         Ok((frame, invite))
     }

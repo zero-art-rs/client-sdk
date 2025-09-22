@@ -71,6 +71,7 @@ impl InitialGroupContextBuilder {
         stk: [u8; 32],
         epoch: u64,
         group_info: models::group_info::GroupInfo,
+        is_last_sender: bool,
     ) -> Result<GroupContext> {
         let art: PrivateART<CortadoAffine> = PrivateART::deserialize(art, &leaf_secret)?;
 
@@ -97,6 +98,7 @@ impl InitialGroupContextBuilder {
             group_info,
             proof_system,
             rng: context_rng,
+            is_last_sender
         })
     }
 
@@ -277,6 +279,7 @@ impl CreateGroupContextBuilder {
             proof_system,
             identity_key_pair: KeyPair::from_secret_key(identity_secret_key),
             group_info: group_info.clone(),
+            is_last_sender: true,
         };
 
         // 9. Create invitations

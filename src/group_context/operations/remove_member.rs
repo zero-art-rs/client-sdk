@@ -81,6 +81,8 @@ impl GroupContext {
                 prover_artefacts,
                 self.art.secret_key,
             )?;
+        
+        self.is_last_sender = true;
 
         Ok(frame)
     }

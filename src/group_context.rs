@@ -57,6 +57,8 @@ pub struct GroupContext {
     identity_key_pair: KeyPair,
 
     group_info: models::group_info::GroupInfo,
+
+    is_last_sender: bool,
 }
 
 impl GroupContext {
@@ -99,6 +101,7 @@ impl GroupContext {
         stk: [u8; 32],
         epoch: u64,
         group_info: models::group_info::GroupInfo,
+        is_last_sender: bool,
     ) -> Result<Self> {
         let art: PrivateART<CortadoAffine> = PrivateART::deserialize(art, &leaf_secret)?;
 
@@ -117,6 +120,7 @@ impl GroupContext {
             group_info,
             proof_system,
             rng: context_rng,
+            is_last_sender
         })
     }
 
@@ -171,6 +175,7 @@ impl GroupContext {
             rng: context_rng,
             group_info: group_info,
             identity_key_pair: KeyPair::from_secret_key(identity_secret_key),
+            is_last_sender: false
         };
 
         let leaf_secret = ScalarField::rand(&mut group_context.rng);
@@ -225,6 +230,8 @@ impl GroupContext {
                 return Ok(vec![]);
             }
 
+            self.is_last_sender = false;
+
             return Ok(protected_payload
                 .protected_payload_tbs()
                 .payloads()
@@ -265,6 +272,9 @@ impl GroupContext {
                 if self.epoch + 1 != frame.frame_tbs().epoch() {
                     return Err(Error::InvalidEpoch);
                 }
+
+                self.is_last_sender = false;
+
 
                 let verifier_artefacts = self.art.compute_artefacts_for_verification(&changes)?;
                 let owner_leaf_public_key = self.group_owner_leaf_public_key()?;
@@ -308,6 +318,9 @@ impl GroupContext {
                     return Err(Error::InvalidEpoch);
                 }
 
+                self.is_last_sender = false;
+
+
                 let verifier_artefacts = self.art.compute_artefacts_for_verification(&changes)?;
 
                 let old_leaf_public_key = self.art.get_node(&changes.node_index)?.public_key;
@@ -317,21 +330,9 @@ impl GroupContext {
                     old_leaf_public_key,
                 )?;
 
-                println!();
-                println!();
-                println!("Process frame before ART: {:?}", self.art.get_root());
-                println!("Process frame before TK: {:?}", self.art.get_root_key());
-                println!("Process frame before STK: {:?}", self.stk);
                 self.art.update_private_art(&changes)?;
                 self.advance_epoch()?;
 
-                println!();
-                println!("Changes: {:?}", changes);
-                println!("Process frame after ART: {:?}", self.art.get_root());
-                println!("Process frame after TK: {:?}", self.art.get_root_key());
-                println!("Process frame after STK: {:?}", self.stk);
-                println!();
-                println!();
                 let protected_payload =
                     models::protected_payload::ProtectedPayload::decode(&self.decrypt(
                         frame.frame_tbs().protected_payload(),
@@ -394,6 +395,11 @@ impl GroupContext {
         &mut self,
         payloads: Vec<models::payload::Payload>,
     ) -> Result<models::frame::Frame> {
+        if !self.is_last_sender {
+            let leaf_secret = ScalarField::rand(&mut self.rng);
+            return self.key_update(leaf_secret, payloads);
+        }
+
         let tk = self.art.get_root_key()?;
         let frame = self
             .create_frame_tbs(payloads, None)?

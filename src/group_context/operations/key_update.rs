@@ -32,6 +32,7 @@ impl GroupContext {
             .create_frame_tbs(payloads, Some(GroupOperation::KeyUpdate(changes)))?
             .prove_art::<Sha3_256>(&mut self.proof_system, prover_artefacts, old_secret)?;
 
+        self.is_last_sender = true;
         Ok(frame)
     }
 }

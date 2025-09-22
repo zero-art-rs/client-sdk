@@ -145,6 +145,7 @@ fn test_create_new_group() {
         stk.try_into().unwrap(),
         epoch,
         group_info.try_into().unwrap(),
+        false
     )
     .unwrap();
 
