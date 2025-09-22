@@ -133,8 +133,13 @@ pub struct GroupContext {
 impl GroupContext {
     pub fn sign_with_tk(&self, msg: &[u8]) -> Result<Vec<u8>, Error> {
         let tk = self.art.get_root_key()?;
+        println!("TkPk: {}", (CortadoAffine::generator() * tk.key).into_affine());
+        println!("msg: {:?}", msg);
+
         let tk_public_key = (CortadoAffine::generator() * tk.key).into_affine();
-        Ok(schnorr::sign(&vec![tk.key], &vec![tk_public_key], msg)?)
+        let signature = schnorr::sign(&vec![tk.key], &vec![tk_public_key], msg)?;
+        println!("Signature: {:?}", signature);
+        Ok(signature)
     }
 
     pub fn get_epoch(&self) -> u64 {
