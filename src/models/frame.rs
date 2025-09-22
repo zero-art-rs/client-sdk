@@ -1,5 +1,4 @@
 use ark_ec::{AffineRepr, CurveGroup};
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use art::types::{BranchChanges, ProverArtefacts, PublicART, VerifierArtefacts};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use crypto::schnorr;
@@ -88,13 +87,13 @@ impl TryFrom<zero_art_proto::Frame> for Frame {
         let proof = if let Some(group_operation) = frame_tbs.group_operation.clone() {
             match group_operation {
                 GroupOperation::AddMember(_) => {
-                    Proof::ArtProof(ARTProof::deserialize_uncompressed(&value.proof[..])?)
+                    Proof::ArtProof(crate::utils::deserialize(&value.proof)?)
                 }
                 GroupOperation::RemoveMember(_) => {
-                    Proof::ArtProof(ARTProof::deserialize_uncompressed(&value.proof[..])?)
+                    Proof::ArtProof(crate::utils::deserialize(&value.proof)?)
                 }
                 GroupOperation::KeyUpdate(_) => {
-                    Proof::ArtProof(ARTProof::deserialize_uncompressed(&value.proof[..])?)
+                    Proof::ArtProof(crate::utils::deserialize(&value.proof)?)
                 }
                 _ => Proof::SchnorrSignature(value.proof),
             }
@@ -111,11 +110,7 @@ impl TryFrom<Frame> for zero_art_proto::Frame {
 
     fn try_from(value: Frame) -> Result<Self> {
         let proof = match value.proof {
-            Proof::ArtProof(art_proof) => {
-                let mut art_proof_bytes = Vec::new();
-                art_proof.serialize_uncompressed(&mut art_proof_bytes)?;
-                art_proof_bytes
-            }
+            Proof::ArtProof(art_proof) => crate::utils::serialize(art_proof)?,
             Proof::SchnorrSignature(signature) => signature,
         };
 

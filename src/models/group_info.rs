@@ -5,6 +5,7 @@ use crate::{
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use chrono::{DateTime, Utc};
 use cortado::CortadoAffine;
+use indexmap::IndexMap;
 use prost::Message;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -108,7 +109,7 @@ impl From<GroupInfo> for zero_art_proto::GroupInfo {
 #[derive(Debug, Default, Clone)]
 pub struct GroupMembers {
     by_id: HashMap<Uuid, User>,
-    by_public_key: HashMap<CortadoAffine, Uuid>,
+    by_public_key: IndexMap<CortadoAffine, Uuid>,
 }
 
 impl GroupMembers {
@@ -121,8 +122,16 @@ impl GroupMembers {
 
     pub fn remove_by_id(&mut self, id: &Uuid) -> Option<User> {
         if let Some(user) = self.by_id.remove(id) {
-            self.by_public_key.remove(&user.public_key);
+            self.by_public_key.shift_remove(&user.public_key);
             Some(user)
+        } else {
+            None
+        }
+    }
+
+    pub fn remove_by_public_key(&mut self, public_key: &CortadoAffine) -> Option<User> {
+        if let Some(id) = self.by_public_key.shift_remove(public_key) {
+            self.by_id.remove(&id)
         } else {
             None
         }
@@ -142,6 +151,10 @@ impl GroupMembers {
             .and_then(|id| self.by_id.get(id))
     }
 
+    pub fn get_index_by_public_key(&self, public_key: &CortadoAffine) -> Option<usize> {
+        self.by_public_key.get_index_of(public_key)
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &User> {
         self.by_id.values()
     }
@@ -152,6 +165,11 @@ impl GroupMembers {
 
     pub fn iter_with_ids(&self) -> impl Iterator<Item = (&Uuid, &User)> {
         self.by_id.iter()
+    }
+
+    pub fn reindex(&mut self, order: HashMap<CortadoAffine, usize>) {
+        self.by_public_key
+            .sort_by_key(|k, _| order.get(k).unwrap_or(&usize::MAX));
     }
 }
 

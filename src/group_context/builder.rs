@@ -13,14 +13,12 @@ use prost::Message;
 use sha3::{Digest, Sha3_256};
 
 use crate::{
-    group_context::{
-        Error, GroupContext, KeyPair,
-        utils::{self, decrypt},
-    },
-    models, proof_system, zero_art_proto,
+    error::Result,
+    group_context::{Error, GroupContext, KeyPair},
+    models, proof_system,
+    utils::serialize,
+    zero_art_proto,
 };
-
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, serialize_to_vec};
 
 pub struct GroupContextBuilder;
 
@@ -73,7 +71,7 @@ impl InitialGroupContextBuilder {
         stk: [u8; 32],
         epoch: u64,
         group_info: models::group_info::GroupInfo,
-    ) -> Result<GroupContext, Error> {
+    ) -> Result<GroupContext> {
         let art: PrivateART<CortadoAffine> = PrivateART::deserialize(art, &leaf_secret)?;
 
         // 1. Init PRNGs
@@ -93,10 +91,9 @@ impl InitialGroupContextBuilder {
 
         Ok(GroupContext {
             art,
-            stk: Box::new(stk),
+            stk,
             identity_key_pair,
             epoch,
-            seq_num: 0,
             group_info,
             proof_system,
             rng: context_rng,
@@ -108,14 +105,14 @@ impl InitialGroupContextBuilder {
         leaf_secret: ScalarField,
         invite: zero_art_proto::Invite,
         user: models::group_info::User,
-    ) -> Result<FromInviteGroupContextBuilder, Error> {
+    ) -> Result<FromInviteGroupContextBuilder> {
         if invite.invite.is_none() {
             return Err(Error::InvalidInput);
         }
 
         let invite_tbs = invite.invite.clone().ok_or(Error::InvalidInput)?;
-        let inviter_public_key =
-            CortadoAffine::deserialize_uncompressed(&invite_tbs.identity_public_key[..])?;
+        let inviter_public_key: CortadoAffine =
+            crate::utils::deserialize(&invite_tbs.identity_public_key)?;
         schnorr::verify(
             &invite.signature,
             &vec![inviter_public_key],
@@ -175,15 +172,12 @@ impl CreateGroupContextBuilder {
 
     pub fn build(
         self,
-    ) -> Result<
-        (
-            GroupContext,
-            models::frame::Frame,
-            HashMap<CortadoAffine, models::invite::Invite>,
-            Vec<models::invite::Invite>,
-        ),
-        Error,
-    > {
+    ) -> Result<(
+        GroupContext,
+        models::frame::Frame,
+        HashMap<CortadoAffine, models::invite::Invite>,
+        Vec<models::invite::Invite>,
+    )> {
         // 1. Init PRNGs
         let mut context_rng = if self.init.context_prng_seed.is_none() {
             StdRng::from_rng(thread_rng()).unwrap()
@@ -191,19 +185,17 @@ impl CreateGroupContextBuilder {
             StdRng::from_seed(self.init.context_prng_seed.unwrap())
         };
 
-        let proof_system = if self.init.proof_system_prng_seed.is_none() {
-            proof_system::ProofSystem::default()
-        } else {
-            proof_system::ProofSystem::new(self.init.proof_system_prng_seed.unwrap())
-        };
+        let proof_system = self
+            .init
+            .proof_system_prng_seed
+            .map(|seed| proof_system::ProofSystem::new(seed))
+            .unwrap_or_default();
 
         // 2. Compute identity and ephemeral public keys
         let identity_secret_key = self.init.identity_secret_key;
         let identity_public_key = (CortadoAffine::generator() * identity_secret_key).into_affine();
 
         let ephemeral_secret_key = ScalarField::rand(&mut context_rng);
-        // let ephemeral_public_key =
-        //     (CortadoAffine::generator() * ephemeral_secret_key).into_affine();
 
         // 3. Prepare buffers for invites
         let identified_members_keys = self.identified_members_keys;
@@ -263,9 +255,9 @@ impl CreateGroupContextBuilder {
         )?;
 
         // 7. Derive first stage key
-        let stk = utils::hkdf(
+        let stk = crate::utils::hkdf(
             Some(b"stage-key-derivation"),
-            &vec![&vec![0u8; 32][..], &serialize_to_vec![tk.key]?].concat(),
+            &vec![&vec![0u8; 32][..], &serialize(tk.key)?].concat(),
         )?;
 
         // 8. Form initial metadata
@@ -274,14 +266,13 @@ impl CreateGroupContextBuilder {
         *user.public_key_mut() = identity_public_key;
         group_info.members_mut().add_user(user);
 
-        let epoch = 0;
+        let _epoch = 0;
 
         // 9. Build group context
-        let mut group_context = GroupContext {
+        let group_context = GroupContext {
             art,
             epoch: 0,
-            seq_num: 0,
-            stk: Box::new(stk),
+            stk,
             rng: context_rng,
             proof_system,
             identity_key_pair: KeyPair::from_secret_key(identity_secret_key),
@@ -298,7 +289,7 @@ impl CreateGroupContextBuilder {
                 group_context.compute_leaf_secret_for_invitee(invitee, ephemeral_secret_key)?;
             let invite = group_context.create_invite(invitee, leaf_secret, ephemeral_secret_key)?;
 
-            identified_invites.insert(identity_public_key, invite);
+            identified_invites.insert(invitee_public_key, invite);
         }
 
         for secret_key in unidentified_leaf_secrets {
@@ -345,12 +336,10 @@ impl FromInviteGroupContextBuilder {
         self
     }
 
-    fn compute_invite_leaf_secret(&mut self) -> Result<ScalarField, Error> {
+    fn compute_invite_leaf_secret(&mut self) -> Result<ScalarField> {
         let invite_tbs = self.invite.clone().invite.ok_or(Error::InvalidInput)?;
-        let inviter_public_key =
-            CortadoAffine::deserialize_uncompressed(&invite_tbs.identity_public_key[..])?;
-        let ephemeral_public_key =
-            CortadoAffine::deserialize_uncompressed(&invite_tbs.ephemeral_public_key[..])?;
+        let inviter_public_key = crate::utils::deserialize(&invite_tbs.identity_public_key)?;
+        let ephemeral_public_key = crate::utils::deserialize(&invite_tbs.ephemeral_public_key)?;
 
         let invite_leaf_secret = match invite_tbs.invite.ok_or(Error::InvalidInput)? {
             zero_art_proto::invite_tbs::Invite::IdentifiedInvite(_) => {
@@ -364,8 +353,7 @@ impl FromInviteGroupContextBuilder {
                 )?)
             }
             zero_art_proto::invite_tbs::Invite::UnidentifiedInvite(inv) => {
-                let temporary_secret_key =
-                    ScalarField::deserialize_uncompressed(&inv.private_key[..])?;
+                let temporary_secret_key = crate::utils::deserialize(&inv.private_key)?;
 
                 ScalarField::from_le_bytes_mod_order(&x3dh_b::<CortadoAffine>(
                     temporary_secret_key,
@@ -387,7 +375,7 @@ impl FromInviteGroupContextBuilder {
         mut self,
         art: PublicART<CortadoAffine>,
         invite_frame: zero_art_proto::Frame,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         // 1. Init PRNGs
         let mut context_rng = if self.init.context_prng_seed.is_none() {
             StdRng::from_rng(thread_rng()).unwrap()
@@ -403,12 +391,11 @@ impl FromInviteGroupContextBuilder {
 
         let inviter_leaf_secret = self.compute_invite_leaf_secret()?;
 
-        let mut inviter_leaf_secret_bytes = Vec::new();
-        inviter_leaf_secret.serialize_uncompressed(&mut inviter_leaf_secret_bytes)?;
+        let inviter_leaf_secret_bytes = crate::utils::serialize(inviter_leaf_secret)?;
 
         let invite_tbs = self.invite.clone().invite.ok_or(Error::InvalidInput)?;
 
-        let protected_invite_data = decrypt(
+        let protected_invite_data = crate::utils::decrypt(
             &inviter_leaf_secret_bytes.try_into().unwrap(),
             &invite_tbs.protected_invite_data,
             &[],
@@ -425,7 +412,7 @@ impl FromInviteGroupContextBuilder {
         let invite_frame_protected_payload =
             std::mem::take(&mut invite_frame_tbs.protected_payload);
 
-        let invite_frame_protected_payload = decrypt(
+        let invite_frame_protected_payload = crate::utils::decrypt(
             &stage_key,
             &invite_frame_protected_payload,
             &Sha3_256::digest(invite_frame_tbs.encode_to_vec()),
