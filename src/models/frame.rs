@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use ark_ec::{AffineRepr, CurveGroup};
 use art::types::{BranchChanges, ProverArtefacts, PublicART, VerifierArtefacts};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
@@ -13,7 +15,7 @@ use crate::{
     proof_system, zero_art_proto,
 };
 
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Frame {
     frame_tbs: FrameTbs,
     proof: Proof,
@@ -125,6 +127,15 @@ impl TryFrom<Frame> for zero_art_proto::Frame {
 pub enum Proof {
     ArtProof(ARTProof),
     SchnorrSignature(Vec<u8>),
+}
+
+impl Debug for Proof {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Proof::ArtProof(_) => write!(f, "ArtProof(<opaque>)"),
+            Proof::SchnorrSignature(sig) => write!(f, "SchnorrSignature({:?})", sig),
+        }
+    }
 }
 
 impl Default for Proof {

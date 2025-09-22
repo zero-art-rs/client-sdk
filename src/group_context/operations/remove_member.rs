@@ -14,6 +14,7 @@ use crate::{
     },
 };
 use cortado::{CortadoAffine, Fr as ScalarField};
+use tracing::{trace, info, debug, instrument};
 
 impl GroupContext {
     // remove_member should:
@@ -22,16 +23,14 @@ impl GroupContext {
     // 3. Create frame without encrypted payload
     // 4. Encrypt provided payload and attach to frame
     // 5. Generate proof for ART change with SHA3-256(frame) in associated data
-    // Return Frame(serialized?)
+    #[instrument(skip(self, payloads))]
     pub fn remove_member(
         &mut self,
-        // TOOD: We also should take new leaf secret key
-        // maybe it should be another function to add ability
-        // to user generate secrets on its own
-        // public_key -> actor_id
         public_key: CortadoAffine,
         mut payloads: Vec<Payload>,
     ) -> Result<Frame> {
+        info!("Start remove_member");
+        
         // 1. Generate temporary leaf secret
         let temporary_leaf_secret: ark_ff::Fp<ark_ff::MontBackend<cortado::FrConfig, 4>, 4> =
             ScalarField::rand(&mut self.rng);
@@ -84,6 +83,7 @@ impl GroupContext {
         
         self.is_last_sender = true;
 
+        info!("remove_member finished successfully");
         Ok(frame)
     }
 }

@@ -354,6 +354,7 @@ dependencies = [
  "sha3",
  "static_assertions",
  "thiserror 2.0.16",
+ "tracing",
  "uuid",
  "zk",
  "zkp",
