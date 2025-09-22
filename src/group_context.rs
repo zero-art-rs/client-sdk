@@ -139,6 +139,7 @@ impl GroupContext {
         let tk_public_key = (CortadoAffine::generator() * tk.key).into_affine();
         let signature = schnorr::sign(&vec![tk.key], &vec![tk_public_key], msg)?;
         println!("Signature: {:?}", signature);
+        schnorr::verify(&signature, &vec![tk_public_key], msg)?;
         Ok(signature)
     }
 
