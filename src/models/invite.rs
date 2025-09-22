@@ -109,14 +109,14 @@ impl InviteTbs {
     }
 
     pub fn ephemeral_public_key(&self) -> CortadoAffine {
-        self.inviter_public_key
+        self.ephemeral_public_key
     }
 
     pub fn protected_invite_data(&self) -> &[u8] {
         &self.protected_invite_data
     }
 
-    // Sign payload and return ProtectedPayload
+    // Sign payload and return Invite
     pub fn sign<D: Digest>(self, secret_key: ScalarField) -> Result<Invite> {
         let public_key = (CortadoAffine::generator() * secret_key).into_affine();
         let signature = schnorr::sign(

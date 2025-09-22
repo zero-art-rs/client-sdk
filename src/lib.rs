@@ -1,7 +1,6 @@
 pub mod builders;
 pub mod error;
 pub mod group_context;
-pub mod invite;
 pub mod models;
 pub mod proof_system;
 pub mod secrets_factory;

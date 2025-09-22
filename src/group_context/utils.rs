@@ -1,14 +1,10 @@
-use ark_ec::{AffineRepr, CurveGroup};
-use ark_ff::PrimeField;
 use ark_serialize::serialize_to_vec;
 use art::traits::ARTPrivateAPI;
-use cortado::{self, CortadoAffine, Fr as ScalarField};
-use crypto::{CryptoError, x3dh::x3dh_a};
+use cortado::{self, Fr as ScalarField};
+use crypto::CryptoError;
 
 use hkdf::Hkdf;
 use sha3::Sha3_256;
-
-use crate::invite;
 
 use aes_gcm::aead::{Aead, KeyInit, Nonce, Payload};
 use aes_gcm::{Aes256Gcm, Key};
@@ -22,35 +18,6 @@ impl GroupContext {
 
     pub fn decrypt(&self, ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>, Error> {
         decrypt(&self.stk, ciphertext, aad)
-    }
-
-    pub(super) fn compute_member_leaf_secret(
-        &self,
-        ephemeral_secret_key: ScalarField,
-        invitee: invite::Invitee,
-    ) -> Result<ScalarField, Error> {
-        // Compute new member leaf secret
-        let (identity_public_key, invitation_public_key) = match invitee {
-            invite::Invitee::Identified {
-                identity_public_key,
-                spk_public_key,
-            } => (
-                identity_public_key,
-                spk_public_key.unwrap_or(identity_public_key),
-            ),
-            invite::Invitee::Unidentified(secret_key) => {
-                let invitation_public_key = (CortadoAffine::generator() * secret_key).into_affine();
-                (invitation_public_key, invitation_public_key)
-            }
-        };
-
-        let member_leaf_secret = ScalarField::from_le_bytes_mod_order(&x3dh_a(
-            self.identity_key_pair.secret_key,
-            ephemeral_secret_key,
-            identity_public_key,
-            invitation_public_key,
-        )?);
-        Ok(member_leaf_secret)
     }
 
     /// Compute next STK and increment epoch

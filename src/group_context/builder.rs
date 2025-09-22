@@ -17,7 +17,7 @@ use crate::{
         Error, GroupContext, KeyPair,
         utils::{self, decrypt},
     },
-    invite, models, proof_system, zero_art_proto,
+    models, proof_system, zero_art_proto,
 };
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, serialize_to_vec};
@@ -138,7 +138,7 @@ pub struct CreateGroupContextBuilder {
     group_info: models::group_info::GroupInfo,
     identified_members_keys: Vec<(CortadoAffine, Option<CortadoAffine>)>,
     unidentified_members_count: usize,
-    payloads: Vec<zero_art_proto::Payload>,
+    payloads: Vec<models::payload::Payload>,
 }
 
 impl CreateGroupContextBuilder {
@@ -159,12 +159,12 @@ impl CreateGroupContextBuilder {
             .push((identity_public_key, spk_public_key));
     }
 
-    pub fn payloads(mut self, payloads: Vec<zero_art_proto::Payload>) -> Self {
+    pub fn payloads(mut self, payloads: Vec<models::payload::Payload>) -> Self {
         self.payloads = payloads;
         self
     }
 
-    pub fn push_payload(&mut self, payload: zero_art_proto::Payload) {
+    pub fn push_payload(&mut self, payload: models::payload::Payload) {
         self.payloads.push(payload);
     }
 
@@ -178,9 +178,9 @@ impl CreateGroupContextBuilder {
     ) -> Result<
         (
             GroupContext,
-            zero_art_proto::Frame,
-            HashMap<Vec<u8>, zero_art_proto::Invite>,
-            Vec<zero_art_proto::Invite>,
+            models::frame::Frame,
+            HashMap<CortadoAffine, models::invite::Invite>,
+            Vec<models::invite::Invite>,
         ),
         Error,
     > {
@@ -216,9 +216,9 @@ impl CreateGroupContextBuilder {
         let mut unidentified_secret_keys: Vec<ScalarField> =
             Vec::with_capacity(unidentified_members_count);
 
-        let mut identified_invites: HashMap<Vec<u8>, zero_art_proto::Invite> =
+        let mut identified_invites: HashMap<CortadoAffine, models::invite::Invite> =
             HashMap::with_capacity(identified_members_keys.len());
-        let mut unidentified_invites: Vec<zero_art_proto::Invite> =
+        let mut unidentified_invites: Vec<models::invite::Invite> =
             Vec::with_capacity(unidentified_members_count);
 
         // 4. Compute identified members leaf secrets
@@ -274,6 +274,8 @@ impl CreateGroupContextBuilder {
         *user.public_key_mut() = identity_public_key;
         group_info.members_mut().add_user(user);
 
+        let epoch = 0;
+
         // 9. Build group context
         let mut group_context = GroupContext {
             art,
@@ -287,62 +289,38 @@ impl CreateGroupContextBuilder {
         };
 
         // 9. Create invitations
-        for (identity_public_key, spk_public_key) in identified_members_keys {
-            let invite = invite::Invite {
-                invitee: invite::Invitee::Identified {
-                    identity_public_key,
-                    spk_public_key,
-                },
-                inviter_public_key: CortadoAffine::default(),
-                ephemeral_public_key: CortadoAffine::default(),
-                epoch: 0,
-                group_info: group_info.clone(),
-                stage_key: stk,
-            }
-            .try_into(identity_secret_key, ephemeral_secret_key)?;
+        for (invitee_public_key, spk_public_key) in identified_members_keys {
+            let invitee = models::invite::Invitee::Identified {
+                identity_public_key: invitee_public_key,
+                spk_public_key,
+            };
+            let leaf_secret =
+                group_context.compute_leaf_secret_for_invitee(invitee, ephemeral_secret_key)?;
+            let invite = group_context.create_invite(invitee, leaf_secret, ephemeral_secret_key)?;
 
-            let mut public_key_bytes = Vec::new();
-            identity_public_key.serialize_uncompressed(&mut public_key_bytes)?;
-            identified_invites.insert(public_key_bytes, invite);
+            identified_invites.insert(identity_public_key, invite);
         }
 
         for secret_key in unidentified_leaf_secrets {
-            let invite = invite::Invite {
-                invitee: invite::Invitee::Unidentified(secret_key),
-                inviter_public_key: CortadoAffine::default(),
-                ephemeral_public_key: CortadoAffine::default(),
-                epoch: 0,
-                group_info: group_info.clone(),
-                stage_key: stk,
-            }
-            .try_into(identity_secret_key, ephemeral_secret_key)?;
+            let invitee = models::invite::Invitee::Unidentified(secret_key);
+            let leaf_secret =
+                group_context.compute_leaf_secret_for_invitee(invitee, ephemeral_secret_key)?;
+            let invite = group_context.create_invite(invitee, leaf_secret, ephemeral_secret_key)?;
 
             unidentified_invites.push(invite);
         }
 
-        // 10. Build initial frame
-        let init_payload_bytes = zero_art_proto::Payload {
-            content: Some(zero_art_proto::payload::Content::Action(
-                zero_art_proto::GroupActionPayload {
-                    action: Some(zero_art_proto::group_action_payload::Action::Init(
-                        group_info.into(),
-                    )),
-                },
-            )),
-        };
+        let init_payload_bytes = models::payload::Payload::Action(
+            models::payload::GroupActionPayload::Init(group_info.clone()),
+        );
 
         let mut payloads = self.payloads;
         payloads.push(init_payload_bytes);
-        let mut frame = group_context.create_init_frame_unproved(payloads)?;
 
-        // 4. Build and sign (with identity key) frame
-        let proof = schnorr::sign(
-            &vec![identity_secret_key],
-            &vec![identity_public_key],
-            &Sha3_256::digest(frame.frame.as_ref().unwrap().encode_to_vec()),
-        )?;
-
-        frame.proof = proof;
+        // TODO: Add Init with PublicART
+        let frame = group_context
+            .create_frame_tbs(payloads, None)?
+            .prove_schnorr::<Sha3_256>(identity_secret_key)?;
 
         Ok((
             group_context,
