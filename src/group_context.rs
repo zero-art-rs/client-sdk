@@ -169,6 +169,24 @@ impl GroupContext {
         ))
     }
 
+    pub fn to_parts(&self) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, u64, Vec<u8>), Error> {
+        let group_info: zero_art_proto::GroupInfo = self.group_info.clone().into();
+
+        let mut leaf_secret = Vec::new();
+        self.art
+            .secret_key
+            .serialize_uncompressed(&mut leaf_secret)?;
+        let art = self.art.serialize()?;
+        let stk = self.stk.to_vec();
+        Ok((
+            leaf_secret,
+            art,
+            stk,
+            self.epoch,
+            group_info.encode_to_vec(),
+        ))
+    }
+
     pub fn from_parts(
         identity_secret_key: ScalarField,
         leaf_secret: ScalarField,
