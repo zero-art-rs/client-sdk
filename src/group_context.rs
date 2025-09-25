@@ -28,7 +28,7 @@ use zk::art::{ARTProof, art_prove};
 
 use crate::group_context::utils::{decrypt, derive_stage_key, encrypt};
 use crate::models::frame::Frame;
-use crate::models::group_info::{GroupInfo, User};
+use crate::models::group_info::{GroupInfo, GroupMembers, User};
 use crate::models::payload;
 use crate::{
     builders,
@@ -160,9 +160,7 @@ impl GroupContext {
         let group_info: zero_art_proto::GroupInfo = self.group_info.into();
 
         let mut leaf_secret = Vec::new();
-        self.art
-            .secret_key
-            .serialize_compressed(&mut leaf_secret)?;
+        self.art.secret_key.serialize_compressed(&mut leaf_secret)?;
         let art = self.art.serialize()?;
         let stk = self.stk.to_vec();
         Ok((
@@ -178,9 +176,7 @@ impl GroupContext {
         let group_info: zero_art_proto::GroupInfo = self.group_info.clone().into();
 
         let mut leaf_secret = Vec::new();
-        self.art
-            .secret_key
-            .serialize_compressed(&mut leaf_secret)?;
+        self.art.secret_key.serialize_compressed(&mut leaf_secret)?;
         let art = self.art.serialize()?;
         let stk = self.stk.to_vec();
         Ok((
@@ -241,7 +237,13 @@ impl GroupContext {
             seq_num: 0,
             proof_system: proof_system::ProofSystem::default(),
             rng: context_rng,
-            group_info: invite.group_info,
+            group_info: GroupInfo {
+                id: invite.group_info.id,
+                name: invite.group_info.name,
+                created: invite.group_info.created,
+                metadata: invite.group_info.metadata,
+                members: GroupMembers::default(),
+            },
             identity_key_pair: KeyPair::from_secret_key(identity_secret_key),
         };
 
@@ -265,16 +267,21 @@ impl GroupContext {
         &mut self,
         sp_frame: zero_art_proto::SpFrame,
     ) -> Result<Vec<models::payload::Payload>, Error> {
+        println!("Start process frame!");
         let frame = sp_frame.frame.ok_or(Error::InvalidInput)?;
         let frame = models::frame::Frame::try_from(frame)?;
         // Validate that frame belong to this group
+
+        println!("Frame group id: {}", frame.frame_tbs().group_id());
         let group_id = frame.frame_tbs().group_id();
         if group_id != self.group_info.id {
             return Err(Error::InvalidInput);
         }
 
+        println!("Frame epoch: {}", frame.frame_tbs().epoch());
         let epoch = frame.frame_tbs().epoch();
         if frame.frame_tbs().group_operation().is_none() {
+            println!("Frame without group operation");
             if self.epoch != epoch {
                 return Err(Error::InvalidEpoch);
             }
@@ -311,8 +318,11 @@ impl GroupContext {
                 .to_vec());
         }
 
+        println!("Frame with group operation");
+
         match frame.frame_tbs().group_operation().unwrap() {
             models::frame::GroupOperation::Init(_) => {
+                println!("Init frame");
                 if frame.frame_tbs().epoch() != 0 {
                     return Ok(vec![]);
                 }
@@ -340,26 +350,29 @@ impl GroupContext {
                     .to_vec());
             }
             models::frame::GroupOperation::AddMember(changes) => {
+                println!("AddMember frame");
+
                 if self.epoch >= frame.frame_tbs().epoch() && self.group_info.members.len() != 0 {
                     return Ok(vec![]);
                 }
-                if self.epoch + 1 != frame.frame_tbs().epoch() && self.group_info.members.len() != 0 {
+                if self.epoch + 1 != frame.frame_tbs().epoch() && self.group_info.members.len() != 0
+                {
                     return Err(Error::InvalidEpoch);
                 }
 
                 if self.group_info.members.len() != 0 {
-                    let verifier_artefacts = self.art.compute_artefacts_for_verification(&changes)?;
+                    let verifier_artefacts =
+                        self.art.compute_artefacts_for_verification(&changes)?;
                     let owner_leaf_public_key = self.group_owner_leaf_public_key()?;
-    
+
                     frame.verify_art::<Sha3_256>(
                         &self.proof_system,
                         verifier_artefacts,
                         owner_leaf_public_key,
                     )?;
-    
+
                     self.art.update_private_art(&changes)?;
                     self.advance_epoch()?;
-
                 }
 
                 let protected_payload =
@@ -381,17 +394,20 @@ impl GroupContext {
                     protected_payload.verify::<Sha3_256>(sender.public_key)?;
                 }
 
-                let group_infos = protected_payload.protected_payload_tbs().payloads().iter().filter_map(|payload| {
-                    match payload {
-                        payload::Payload::Action(group_action) => {
-                            match group_action {
-                                payload::GroupActionPayload::InviteMember(group_info) => Some(group_info.clone()),
-                                _ => None,
+                let group_infos = protected_payload
+                    .protected_payload_tbs()
+                    .payloads()
+                    .iter()
+                    .filter_map(|payload| match payload {
+                        payload::Payload::Action(group_action) => match group_action {
+                            payload::GroupActionPayload::InviteMember(group_info) => {
+                                Some(group_info.clone())
                             }
+                            _ => None,
                         },
                         _ => None,
-                    }
-                }).collect::<Vec<GroupInfo>>();
+                    })
+                    .collect::<Vec<GroupInfo>>();
 
                 if self.group_info.members.len() == 0 && group_infos.len() != 0 {
                     self.group_info = group_infos.get(0).unwrap().clone();
@@ -403,6 +419,8 @@ impl GroupContext {
                     .to_vec());
             }
             models::frame::GroupOperation::KeyUpdate(changes) => {
+                println!("KeyUpdate frame");
+
                 if self.epoch >= frame.frame_tbs().epoch() {
                     return Ok(vec![]);
                 }
