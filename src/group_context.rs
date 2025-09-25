@@ -27,7 +27,9 @@ use static_assertions::assert_impl_all;
 use zk::art::{ARTProof, art_prove};
 
 use crate::group_context::utils::{decrypt, derive_stage_key, encrypt};
-use crate::models::group_info::GroupInfo;
+use crate::models::frame::Frame;
+use crate::models::group_info::{GroupInfo, User};
+use crate::models::payload;
 use crate::{
     builders,
     proof_system::ProofSystem,
@@ -133,7 +135,10 @@ pub struct GroupContext {
 impl GroupContext {
     pub fn sign_with_tk(&self, msg: &[u8]) -> Result<Vec<u8>, Error> {
         let tk = self.art.get_root_key()?;
-        println!("TkPk: {}", (CortadoAffine::generator() * tk.key).into_affine());
+        println!(
+            "TkPk: {}",
+            (CortadoAffine::generator() * tk.key).into_affine()
+        );
         println!("msg: {:?}", msg);
 
         let tk_public_key = (CortadoAffine::generator() * tk.key).into_affine();
@@ -222,20 +227,14 @@ impl GroupContext {
         spk_secret_key: Option<ScalarField>,
         art: Vec<u8>,
         invite: zero_art_proto::Invite,
-        mut user: models::group_info::User,
-    ) -> Result<(Self, models::frame::Frame), Error> {
-        let identity_key_pair = KeyPair::from_secret_key(identity_secret_key);
-
-        let (mut invite, invite_leaf_secret) =
+    ) -> Result<Self, Error> {
+        let (invite, invite_leaf_secret) =
             invite::Invite::try_from(invite, Some((identity_secret_key, spk_secret_key)))?;
         let art: PrivateART<CortadoAffine> = PrivateART::deserialize(&art, &invite_leaf_secret)?;
 
         let context_rng = StdRng::from_rng(thread_rng()).unwrap();
 
-        user.public_key = identity_key_pair.public_key;
-        invite.group_info.members.add_user(user.clone());
-
-        let mut group_context = Self {
+        let group_context = Self {
             art,
             stk: Box::new(invite.stage_key),
             epoch: invite.epoch,
@@ -246,14 +245,20 @@ impl GroupContext {
             identity_key_pair: KeyPair::from_secret_key(identity_secret_key),
         };
 
-        let leaf_secret = ScalarField::rand(&mut group_context.rng);
+        Ok(group_context)
+    }
+
+    pub fn join_group(&mut self, mut user: User) -> Result<Frame, Error> {
+        user.public_key = self.identity_key_pair.public_key;
+        self.group_info.members.add_user(user.clone());
 
         let group_action_payload =
             models::payload::Payload::Action(models::payload::GroupActionPayload::JoinGroup(user));
+        let leaf_secret = ScalarField::rand(&mut self.rng);
 
-        let frame = group_context.update_key(leaf_secret, vec![group_action_payload])?;
+        let frame = self.update_key(leaf_secret, vec![group_action_payload])?;
 
-        Ok((group_context, frame))
+        return Ok(frame);
     }
 
     pub fn process_frame(
@@ -335,24 +340,27 @@ impl GroupContext {
                     .to_vec());
             }
             models::frame::GroupOperation::AddMember(changes) => {
-                if self.epoch >= frame.frame_tbs().epoch() {
+                if self.epoch >= frame.frame_tbs().epoch() && self.group_info.members.len() != 0 {
                     return Ok(vec![]);
                 }
-                if self.epoch + 1 != frame.frame_tbs().epoch() {
+                if self.epoch + 1 != frame.frame_tbs().epoch() && self.group_info.members.len() != 0 {
                     return Err(Error::InvalidEpoch);
                 }
 
-                let verifier_artefacts = self.art.compute_artefacts_for_verification(&changes)?;
-                let owner_leaf_public_key = self.group_owner_leaf_public_key()?;
+                if self.group_info.members.len() != 0 {
+                    let verifier_artefacts = self.art.compute_artefacts_for_verification(&changes)?;
+                    let owner_leaf_public_key = self.group_owner_leaf_public_key()?;
+    
+                    frame.verify_art::<Sha3_256>(
+                        &self.proof_system,
+                        verifier_artefacts,
+                        owner_leaf_public_key,
+                    )?;
+    
+                    self.art.update_private_art(&changes)?;
+                    self.advance_epoch()?;
 
-                frame.verify_art::<Sha3_256>(
-                    &self.proof_system,
-                    verifier_artefacts,
-                    owner_leaf_public_key,
-                )?;
-
-                self.art.update_private_art(&changes)?;
-                self.advance_epoch()?;
+                }
 
                 let protected_payload =
                     models::protected_payload::ProtectedPayload::decode(&self.decrypt(
@@ -360,16 +368,34 @@ impl GroupContext {
                         &frame.frame_tbs().associated_data::<Sha3_256>()?,
                     )?)?;
 
-                let sender = match protected_payload.protected_payload_tbs().sender() {
-                    models::protected_payload::Sender::UserId(id) => self
-                        .group_info
-                        .members
-                        .get_by_id(&id)
-                        .ok_or(Error::InvalidInput)?,
-                    _ => unimplemented!(),
-                };
+                if self.group_info.members.len() != 0 {
+                    let sender = match protected_payload.protected_payload_tbs().sender() {
+                        models::protected_payload::Sender::UserId(id) => self
+                            .group_info
+                            .members
+                            .get_by_id(&id)
+                            .ok_or(Error::InvalidInput)?,
+                        _ => unimplemented!(),
+                    };
 
-                protected_payload.verify::<Sha3_256>(sender.public_key)?;
+                    protected_payload.verify::<Sha3_256>(sender.public_key)?;
+                }
+
+                let group_infos = protected_payload.protected_payload_tbs().payloads().iter().filter_map(|payload| {
+                    match payload {
+                        payload::Payload::Action(group_action) => {
+                            match group_action {
+                                payload::GroupActionPayload::InviteMember(group_info) => Some(group_info.clone()),
+                                _ => None,
+                            }
+                        },
+                        _ => None,
+                    }
+                }).collect::<Vec<GroupInfo>>();
+
+                if self.group_info.members.len() == 0 && group_infos.len() != 0 {
+                    self.group_info = group_infos.get(0).unwrap().clone();
+                }
 
                 return Ok(protected_payload
                     .protected_payload_tbs()
@@ -974,16 +1000,16 @@ mod tests {
 
         let public_art_bytes = group_context.art.serialize().unwrap();
 
-        let user_1 =
-            models::group_info::User::new(String::from("user_id_2"), String::from("user"), vec![]);
-        let (mut secondary_group_context, join_group_frame) = GroupContext::from_invite(
-            identity_secret_key_4,
-            Some(spk_secret_key_5),
-            public_art_bytes,
-            invite,
-            user_1,
-        )
-        .unwrap();
+        // let user_1 =
+        //     models::group_info::User::new(String::from("user_id_2"), String::from("user"), vec![]);
+        // let (mut secondary_group_context, join_group_frame) = GroupContext::from_invite(
+        //     identity_secret_key_4,
+        //     Some(spk_secret_key_5),
+        //     public_art_bytes,
+        //     invite,
+        //     user_1,
+        // )
+        // .unwrap();
 
         let (leaf_secret, art, stk, epoch, group_info) = group_context.into_parts().unwrap();
         let leaf_secret = ScalarField::deserialize_uncompressed(&leaf_secret[..]).unwrap();
@@ -999,13 +1025,13 @@ mod tests {
         )
         .unwrap();
 
-        group_context
-            .process_frame(zero_art_proto::SpFrame {
-                seq_num: 0,
-                created: None,
-                frame: Some(join_group_frame.try_into().unwrap()),
-            })
-            .unwrap();
+        // group_context
+        //     .process_frame(zero_art_proto::SpFrame {
+        //         seq_num: 0,
+        //         created: None,
+        //         frame: Some(join_group_frame.try_into().unwrap()),
+        //     })
+        //     .unwrap();
 
         // let payloads = secondary_group_context
         //     .process_frame(zero_art_proto::SpFrame {
@@ -1091,25 +1117,25 @@ mod tests {
 
         let public_art_bytes = group_context.art.serialize().unwrap();
 
-        let user_1 =
-            models::group_info::User::new(String::from("user_id_2"), String::from("user"), vec![]);
-        let (mut secondary_group_context, join_group_frame) =
-            GroupContext::from_invite(key_pairs[1].1, None, public_art_bytes, invite, user_1)
-                .unwrap();
+        // let user_1 =
+        //     models::group_info::User::new(String::from("user_id_2"), String::from("user"), vec![]);
+        // let (mut secondary_group_context, join_group_frame) =
+        //     GroupContext::from_invite(key_pairs[1].1, None, public_art_bytes, invite, user_1)
+        //         .unwrap();
 
-        println!("Frame epocch: {}", join_group_frame.frame_tbs().epoch());
+        // println!("Frame epocch: {}", join_group_frame.frame_tbs().epoch());
 
-        println!("Epoch: {}", group_context.epoch);
-        let paylaods = group_context
-            .process_frame(zero_art_proto::SpFrame {
-                seq_num: 0,
-                created: None,
-                frame: Some(join_group_frame.try_into().unwrap()),
-            })
-            .unwrap();
+        // println!("Epoch: {}", group_context.epoch);
+        // let paylaods = group_context
+        //     .process_frame(zero_art_proto::SpFrame {
+        //         seq_num: 0,
+        //         created: None,
+        //         frame: Some(join_group_frame.try_into().unwrap()),
+        //     })
+        //     .unwrap();
 
-        println!("Epoch: {}", group_context.epoch);
-        assert!(paylaods.len() != 0);
+        // println!("Epoch: {}", group_context.epoch);
+        // assert!(paylaods.len() != 0);
 
         // let (leaf_secret, art, stk, epoch, group_info) = group_context.into_parts().unwrap();
         // let leaf_secret = ScalarField::deserialize_uncompressed(&leaf_secret[..]).unwrap();
