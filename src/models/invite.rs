@@ -1,13 +1,11 @@
-use crate::{
-    error::{Error, Result},
-    models::group_info::GroupInfo,
-};
+use crate::error::{Error, Result};
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use crypto::schnorr;
 use prost::Message;
 use sha3::Digest;
+use uuid::Uuid;
 
 use crate::zero_art_proto;
 
@@ -263,15 +261,15 @@ impl TryFrom<Invitee> for zero_art_proto::invite_tbs::Invite {
 pub struct ProtectedInviteData {
     epoch: u64,
     stage_key: [u8; 32],
-    group_info: GroupInfo,
+    group_id: Uuid,
 }
 
 impl ProtectedInviteData {
-    pub fn new(epoch: u64, stage_key: [u8; 32], group_info: GroupInfo) -> Self {
+    pub fn new(epoch: u64, stage_key: [u8; 32], group_id: Uuid) -> Self {
         Self {
             epoch,
             stage_key,
-            group_info,
+            group_id,
         }
     }
 
@@ -284,8 +282,8 @@ impl ProtectedInviteData {
         self.stage_key
     }
 
-    pub fn group_info(&self) -> &GroupInfo {
-        &self.group_info
+    pub fn group_id(&self) -> Uuid {
+        self.group_id
     }
 
     // Serialization
@@ -309,10 +307,7 @@ impl TryFrom<zero_art_proto::ProtectedInviteData> for ProtectedInviteData {
                 .stage_key
                 .try_into()
                 .map_err(|_| Error::InvalidVerificationMethod)?,
-            group_info: value
-                .group_info
-                .ok_or(Error::RequiredFieldAbsent)?
-                .try_into()?,
+            group_id: Uuid::parse_str(&value.group_id).map_err(|_| Error::InvalidInput)?,
         })
     }
 }
@@ -322,7 +317,7 @@ impl From<ProtectedInviteData> for zero_art_proto::ProtectedInviteData {
         Self {
             epoch: value.epoch,
             stage_key: value.stage_key.to_vec(),
-            group_info: Some(value.group_info.into()),
+            group_id: value.group_id.to_string(),
         }
     }
 }

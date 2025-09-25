@@ -7,8 +7,11 @@ use chrono::{DateTime, Utc};
 use cortado::CortadoAffine;
 use indexmap::IndexMap;
 use prost::Message;
+use sha3::Digest;
 use std::collections::HashMap;
 use uuid::Uuid;
+
+const USER_ID_LENGTH: usize = 32;
 
 #[derive(Debug, Default, Clone)]
 pub struct GroupInfo {
@@ -107,69 +110,44 @@ impl From<GroupInfo> for zero_art_proto::GroupInfo {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct GroupMembers {
-    by_id: HashMap<Uuid, User>,
-    by_public_key: IndexMap<CortadoAffine, Uuid>,
-}
+pub struct GroupMembers(IndexMap<String, User>);
 
 impl GroupMembers {
-    pub fn add_user(&mut self, user: User) {
-        let id = user.id.clone();
-        let key = user.public_key;
-        self.by_public_key.insert(key, id.clone());
-        self.by_id.insert(id, user);
+    pub fn insert_user(&mut self, user: User) {
+        self.0.insert(user.id().to_string(), user);
     }
 
-    pub fn remove_by_id(&mut self, id: &Uuid) -> Option<User> {
-        if let Some(user) = self.by_id.remove(id) {
-            self.by_public_key.shift_remove(&user.public_key);
-            Some(user)
-        } else {
-            None
-        }
-    }
-
-    pub fn remove_by_public_key(&mut self, public_key: &CortadoAffine) -> Option<User> {
-        if let Some(id) = self.by_public_key.shift_remove(public_key) {
-            self.by_id.remove(&id)
-        } else {
-            None
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.by_id.len()
-    }
-
-    pub fn get_by_id(&self, id: &Uuid) -> Option<&User> {
-        self.by_id.get(id)
+    pub fn get_by_index(&self, index: usize) -> Option<(&String, &User)> {
+        self.0.get_index(index)
     }
 
     pub fn get_by_public_key(&self, public_key: &CortadoAffine) -> Option<&User> {
-        self.by_public_key
-            .get(public_key)
-            .and_then(|id| self.by_id.get(id))
+        self.0.get(&public_key_to_id(*public_key))
     }
 
-    pub fn get_index_by_public_key(&self, public_key: &CortadoAffine) -> Option<usize> {
-        self.by_public_key.get_index_of(public_key)
+    pub fn sort_by_keys_indexes(&mut self, keys_indexes: HashMap<String, usize>) {
+        self.0
+            .sort_by_key(|k, _| *keys_indexes.get(k).unwrap_or(&usize::MAX));
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn get(&self, id: &str) -> Option<&User> {
+        self.0.get(id)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &User> {
-        self.by_id.values()
+        self.0.values()
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut User> {
-        self.by_id.values_mut()
+        self.0.values_mut()
     }
 
-    pub fn iter_with_ids(&self) -> impl Iterator<Item = (&Uuid, &User)> {
-        self.by_id.iter()
-    }
-
-    pub fn reindex(&mut self, order: HashMap<CortadoAffine, usize>) {
-        self.by_public_key
-            .sort_by_key(|k, _| order.get(k).unwrap_or(&usize::MAX));
+    pub fn iter_with_ids(&self) -> impl Iterator<Item = (&String, &User)> {
+        self.0.iter()
     }
 }
 
@@ -180,7 +158,7 @@ impl TryFrom<Vec<zero_art_proto::User>> for GroupMembers {
 
         for proto_user in value {
             let user: User = proto_user.try_into()?;
-            members.add_user(user);
+            members.insert_user(user);
         }
 
         Ok(members)
@@ -189,13 +167,13 @@ impl TryFrom<Vec<zero_art_proto::User>> for GroupMembers {
 
 impl From<GroupMembers> for Vec<zero_art_proto::User> {
     fn from(value: GroupMembers) -> Self {
-        value.by_id.into_values().map(|user| user.into()).collect()
+        value.0.into_values().map(|user| user.into()).collect()
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct User {
-    id: Uuid,
+    id: String,
     name: String,
     public_key: CortadoAffine,
     metadata: Vec<u8>,
@@ -205,14 +183,13 @@ pub struct User {
 
 impl User {
     pub fn new(
-        id: Uuid,
         name: String,
         public_key: CortadoAffine,
         metadata: Vec<u8>,
         role: zero_art_proto::Role,
     ) -> Self {
         Self {
-            id,
+            id: public_key_to_id(public_key),
             name,
             public_key,
             metadata,
@@ -220,9 +197,13 @@ impl User {
         }
     }
 
+    pub fn is_pending_invite(&self) -> bool {
+        self.public_key == CortadoAffine::default()
+    }
+
     // Getters
-    pub fn id(&self) -> Uuid {
-        self.id
+    pub fn id(&self) -> &str {
+        &self.id
     }
 
     pub fn name(&self) -> &str {
@@ -262,9 +243,12 @@ impl TryFrom<zero_art_proto::User> for User {
     fn try_from(value: zero_art_proto::User) -> Result<Self> {
         let public_key = CortadoAffine::deserialize_uncompressed(&value.public_key[..])?;
         let role = zero_art_proto::Role::try_from(value.role)?;
+        if value.id.len() != USER_ID_LENGTH || !value.id.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(Error::InvalidInput);
+        }
 
         Ok(Self {
-            id: Uuid::parse_str(&value.id).map_err(|_| Error::RequiredFieldAbsent)?,
+            id: value.id,
             name: value.name,
             public_key,
             metadata: value.picture,
@@ -282,11 +266,24 @@ impl From<User> for zero_art_proto::User {
             .unwrap();
 
         Self {
-            id: value.id.to_string(),
+            id: value.id,
             name: value.name,
             public_key: public_key_bytes,
             picture: value.metadata,
             role: value.role as i32,
         }
+    }
+}
+
+pub fn public_key_to_id(public_key: CortadoAffine) -> String {
+    if public_key == CortadoAffine::default() {
+        hex::encode(rand::random::<[u8; USER_ID_LENGTH / 2]>())
+    } else {
+        // TODO: Remove expect
+        hex::encode(
+            &sha3::Sha3_256::digest(
+                &crate::utils::serialize(public_key).expect("failed to serialize public key"),
+            )[..USER_ID_LENGTH / 2],
+        )
     }
 }

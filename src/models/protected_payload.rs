@@ -4,7 +4,6 @@ use cortado::{self, CortadoAffine, Fr as ScalarField};
 use crypto::schnorr;
 use prost::Message;
 use sha3::Digest;
-use uuid::Uuid;
 
 use crate::{
     error::{Error, Result},
@@ -104,7 +103,7 @@ impl ProtectedPayloadTbs {
     }
 
     // Getters
-    pub fn sqe_num(&self) -> u64 {
+    pub fn seq_num(&self) -> u64 {
         self.seq_num
     }
 
@@ -193,13 +192,13 @@ impl From<ProtectedPayloadTbs> for zero_art_proto::ProtectedPayloadTbs {
 
 #[derive(Debug, Clone)]
 pub enum Sender {
-    UserId(Uuid),
+    UserId(String),
     LeafId(String),
 }
 
 impl Default for Sender {
     fn default() -> Self {
-        Sender::UserId(Uuid::default())
+        Sender::UserId(String::new())
     }
 }
 
@@ -207,9 +206,7 @@ impl From<zero_art_proto::protected_payload_tbs::Sender> for Sender {
     fn from(value: zero_art_proto::protected_payload_tbs::Sender) -> Self {
         match value {
             // TODO: Remove expect
-            zero_art_proto::protected_payload_tbs::Sender::UserId(id) => {
-                Sender::UserId(Uuid::parse_str(&id).expect("Expected user id as uuid"))
-            }
+            zero_art_proto::protected_payload_tbs::Sender::UserId(id) => Sender::UserId(id),
             zero_art_proto::protected_payload_tbs::Sender::LeafId(id) => Sender::LeafId(id),
         }
     }

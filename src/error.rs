@@ -35,6 +35,8 @@ pub enum Error {
     ARTLogicError,
     #[error("Invalid input provided")]
     InvalidInput,
+    #[error("Invalid group")]
+    InvalidGroup,
     // #[error("Postcard error: {0}")]
     // Postcard(#[from] postcard::Error),
     // #[error("Serde JSON error: {0}")]
@@ -54,6 +56,8 @@ pub enum Error {
 
     #[error("Invalid epoch")]
     InvalidEpoch,
+    #[error("Sender absent in group")]
+    InvalidSender,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

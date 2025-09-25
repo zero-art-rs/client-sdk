@@ -1,4 +1,3 @@
-use art::traits::ARTPrivateAPI;
 use sha3::Sha3_256;
 
 use crate::{
@@ -10,7 +9,7 @@ use crate::{
     },
 };
 use cortado::Fr as ScalarField;
-use tracing::{trace, info, debug, instrument};
+use tracing::{debug, info, instrument, trace};
 
 impl GroupContext {
     // key_update should:
@@ -27,21 +26,28 @@ impl GroupContext {
     ) -> Result<Frame> {
         info!("Start key_update");
 
-        let old_secret = self.art.secret_key;
+        let mut pending_state = self.state.clone();
+
+        let old_secret = pending_state.art.secret_key;
         trace!("Old secret key: {:?}", old_secret);
 
-        let (_, changes, prover_artefacts) = self.art.update_key(&leaf_secret)?;
+        let (changes, prover_artefacts) = pending_state.update_key(&leaf_secret)?;
         debug!("Key updated: {:?}", changes);
-        self.advance_epoch()?;
+        pending_state.advance_epoch()?;
         debug!("Epoch advanced");
 
         let frame = self
-            .create_frame_tbs(payloads, Some(GroupOperation::KeyUpdate(changes)))?
+            .create_frame_tbs(
+                &pending_state,
+                payloads,
+                Some(GroupOperation::KeyUpdate(changes)),
+            )?
             .prove_art::<Sha3_256>(&mut self.proof_system, prover_artefacts, old_secret)?;
         debug!("Frame created");
         trace!("Frame: {:?}", frame);
 
-        self.is_last_sender = true;
+        pending_state.is_last_sender = true;
+        self.pending_state = pending_state;
 
         info!("key_update finished successfully");
         Ok(frame)
