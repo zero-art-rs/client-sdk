@@ -1,6 +1,5 @@
-use crate::error::{Error, Result};
+use crate::{error::{Error, Result}, utils::{deserialize, serialize}};
 use ark_ec::{AffineRepr, CurveGroup};
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use crypto::schnorr;
 use prost::Message;
@@ -144,9 +143,9 @@ impl TryFrom<zero_art_proto::InviteTbs> for InviteTbs {
 
     fn try_from(value: zero_art_proto::InviteTbs) -> Result<Self> {
         let inviter_public_key =
-            CortadoAffine::deserialize_uncompressed(&value.identity_public_key[..])?;
+            deserialize(&value.identity_public_key)?;
         let ephemeral_public_key =
-            CortadoAffine::deserialize_uncompressed(&value.ephemeral_public_key[..])?;
+            deserialize(&value.ephemeral_public_key)?;
         Ok(Self {
             invitee: value
                 .invite
@@ -163,20 +162,12 @@ impl TryFrom<InviteTbs> for zero_art_proto::InviteTbs {
     type Error = Error;
 
     fn try_from(value: InviteTbs) -> Result<Self> {
-        let mut inviter_public_key_bytes = Vec::new();
-        value
-            .inviter_public_key
-            .serialize_uncompressed(&mut inviter_public_key_bytes)?;
-
-        let mut ephemeral_public_key_bytes = Vec::new();
-        value
-            .ephemeral_public_key
-            .serialize_uncompressed(&mut ephemeral_public_key_bytes)?;
-
         Ok(Self {
             protected_invite_data: value.protected_invite_data,
-            identity_public_key: inviter_public_key_bytes,
-            ephemeral_public_key: ephemeral_public_key_bytes,
+            identity_public_key: serialize(value
+            .inviter_public_key)?,
+            ephemeral_public_key: serialize(value
+            .ephemeral_public_key)?,
             invite: Some(value.invitee.try_into()?),
         })
     }
@@ -198,12 +189,12 @@ impl TryFrom<zero_art_proto::invite_tbs::Invite> for Invitee {
         match value {
             zero_art_proto::invite_tbs::Invite::IdentifiedInvite(inv) => {
                 let identity_public_key =
-                    CortadoAffine::deserialize_uncompressed(&inv.identity_public_key[..])?;
+                    deserialize(&inv.identity_public_key)?;
                 let spk_public_key = if inv.spk_public_key.len() == 0 {
                     None
                 } else {
-                    Some(CortadoAffine::deserialize_uncompressed(
-                        &inv.spk_public_key[..],
+                    Some(deserialize(
+                        &inv.spk_public_key,
                     )?)
                 };
                 Ok(Invitee::Identified {
@@ -212,7 +203,7 @@ impl TryFrom<zero_art_proto::invite_tbs::Invite> for Invitee {
                 })
             }
             zero_art_proto::invite_tbs::Invite::UnidentifiedInvite(inv) => {
-                let secret_key = ScalarField::deserialize_uncompressed(&inv.private_key[..])?;
+                let secret_key = deserialize(&inv.private_key)?;
                 Ok(Invitee::Unidentified(secret_key))
             }
         }
@@ -228,12 +219,11 @@ impl TryFrom<Invitee> for zero_art_proto::invite_tbs::Invite {
                 identity_public_key,
                 spk_public_key,
             } => {
-                let mut identity_public_key_bytes = Vec::new();
-                identity_public_key.serialize_uncompressed(&mut identity_public_key_bytes)?;
+                let identity_public_key_bytes = serialize(identity_public_key)?;
 
                 let mut spk_public_key_bytes = Vec::new();
                 if let Some(spk_public_key) = spk_public_key {
-                    spk_public_key.serialize_uncompressed(&mut spk_public_key_bytes)?;
+                    spk_public_key_bytes = serialize(spk_public_key)?;
                 }
 
                 Ok(zero_art_proto::invite_tbs::Invite::IdentifiedInvite(
@@ -244,12 +234,9 @@ impl TryFrom<Invitee> for zero_art_proto::invite_tbs::Invite {
                 ))
             }
             Invitee::Unidentified(secret_key) => {
-                let mut secret_key_bytes = Vec::new();
-                secret_key.serialize_uncompressed(&mut secret_key_bytes)?;
-
                 Ok(zero_art_proto::invite_tbs::Invite::UnidentifiedInvite(
                     zero_art_proto::UnidentifiedInvite {
-                        private_key: secret_key_bytes,
+                        private_key: serialize(secret_key)?,
                     },
                 ))
             }

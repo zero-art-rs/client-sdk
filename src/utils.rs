@@ -83,12 +83,12 @@ pub fn compute_leaf_secret_b(
 
 pub fn serialize<T: CanonicalSerialize>(value: T) -> Result<Vec<u8>> {
     let mut value_bytes = Vec::new();
-    value.serialize_uncompressed(&mut value_bytes)?;
+    value.serialize_compressed(&mut value_bytes)?;
     Ok(value_bytes)
 }
 
 pub fn deserialize<T: CanonicalDeserialize>(value_bytes: &[u8]) -> Result<T> {
-    Ok(T::deserialize_uncompressed(value_bytes)?)
+    Ok(T::deserialize_compressed(value_bytes)?)
 }
 
 pub fn hkdf(salt: Option<&[u8]>, ikm: &[u8]) -> Result<[u8; 32]> {

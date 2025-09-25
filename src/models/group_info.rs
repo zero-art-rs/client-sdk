@@ -1,8 +1,6 @@
 use crate::{
-    error::{Error, Result},
-    zero_art_proto,
+    error::{Error, Result}, utils::{deserialize, serialize}, zero_art_proto
 };
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use chrono::{DateTime, Utc};
 use cortado::CortadoAffine;
 use indexmap::IndexMap;
@@ -241,7 +239,7 @@ impl TryFrom<zero_art_proto::User> for User {
     type Error = Error;
 
     fn try_from(value: zero_art_proto::User) -> Result<Self> {
-        let public_key = CortadoAffine::deserialize_uncompressed(&value.public_key[..])?;
+        let public_key = deserialize(&value.public_key)?;
         let role = zero_art_proto::Role::try_from(value.role)?;
         if value.id.len() != USER_ID_LENGTH || !value.id.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(Error::InvalidInput);
@@ -259,16 +257,10 @@ impl TryFrom<zero_art_proto::User> for User {
 
 impl From<User> for zero_art_proto::User {
     fn from(value: User) -> Self {
-        let mut public_key_bytes = Vec::new();
-        value
-            .public_key
-            .serialize_uncompressed(&mut public_key_bytes)
-            .unwrap();
-
         Self {
             id: value.id,
             name: value.name,
-            public_key: public_key_bytes,
+            public_key: serialize(value.public_key).unwrap(),
             picture: value.metadata,
             role: value.role as i32,
         }
