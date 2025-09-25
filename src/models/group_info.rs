@@ -157,7 +157,7 @@ impl TryFrom<zero_art_proto::User> for User {
     type Error = Error;
 
     fn try_from(value: zero_art_proto::User) -> Result<Self, Self::Error> {
-        let public_key = CortadoAffine::deserialize_uncompressed(&value.public_key[..])?;
+        let public_key = CortadoAffine::deserialize_compressed(&value.public_key[..])?;
         let role = zero_art_proto::Role::try_from(value.role)?;
 
         Ok(Self {
@@ -175,7 +175,7 @@ impl From<User> for zero_art_proto::User {
         let mut public_key_bytes = Vec::new();
         value
             .public_key
-            .serialize_uncompressed(&mut public_key_bytes)
+            .serialize_compressed(&mut public_key_bytes)
             .unwrap();
 
         Self {

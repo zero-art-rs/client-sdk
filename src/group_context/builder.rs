@@ -115,7 +115,7 @@ impl InitialGroupContextBuilder {
 
         let invite_tbs = invite.invite.clone().ok_or(Error::InvalidInput)?;
         let inviter_public_key =
-            CortadoAffine::deserialize_uncompressed(&invite_tbs.identity_public_key[..])?;
+            CortadoAffine::deserialize_compressed(&invite_tbs.identity_public_key[..])?;
         schnorr::verify(
             &invite.signature,
             &vec![inviter_public_key],
@@ -302,7 +302,7 @@ impl CreateGroupContextBuilder {
             .try_into(identity_secret_key, ephemeral_secret_key)?;
 
             let mut public_key_bytes = Vec::new();
-            identity_public_key.serialize_uncompressed(&mut public_key_bytes)?;
+            identity_public_key.serialize_compressed(&mut public_key_bytes)?;
             identified_invites.insert(public_key_bytes, invite);
         }
 
@@ -370,9 +370,9 @@ impl FromInviteGroupContextBuilder {
     fn compute_invite_leaf_secret(&mut self) -> Result<ScalarField, Error> {
         let invite_tbs = self.invite.clone().invite.ok_or(Error::InvalidInput)?;
         let inviter_public_key =
-            CortadoAffine::deserialize_uncompressed(&invite_tbs.identity_public_key[..])?;
+            CortadoAffine::deserialize_compressed(&invite_tbs.identity_public_key[..])?;
         let ephemeral_public_key =
-            CortadoAffine::deserialize_uncompressed(&invite_tbs.ephemeral_public_key[..])?;
+            CortadoAffine::deserialize_compressed(&invite_tbs.ephemeral_public_key[..])?;
 
         let invite_leaf_secret = match invite_tbs.invite.ok_or(Error::InvalidInput)? {
             zero_art_proto::invite_tbs::Invite::IdentifiedInvite(_) => {
@@ -387,7 +387,7 @@ impl FromInviteGroupContextBuilder {
             }
             zero_art_proto::invite_tbs::Invite::UnidentifiedInvite(inv) => {
                 let temporary_secret_key =
-                    ScalarField::deserialize_uncompressed(&inv.private_key[..])?;
+                    ScalarField::deserialize_compressed(&inv.private_key[..])?;
 
                 ScalarField::from_le_bytes_mod_order(&x3dh_b::<CortadoAffine>(
                     temporary_secret_key,
@@ -426,7 +426,7 @@ impl FromInviteGroupContextBuilder {
         let inviter_leaf_secret = self.compute_invite_leaf_secret()?;
 
         let mut inviter_leaf_secret_bytes = Vec::new();
-        inviter_leaf_secret.serialize_uncompressed(&mut inviter_leaf_secret_bytes)?;
+        inviter_leaf_secret.serialize_compressed(&mut inviter_leaf_secret_bytes)?;
 
         let invite_tbs = self.invite.clone().invite.ok_or(Error::InvalidInput)?;
 

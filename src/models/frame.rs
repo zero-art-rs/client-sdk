@@ -85,13 +85,13 @@ impl TryFrom<zero_art_proto::Frame> for Frame {
         let proof = if let Some(group_operation) = frame_tbs.group_operation.clone() {
             match group_operation {
                 GroupOperation::AddMember(_) => {
-                    Proof::ArtProof(ARTProof::deserialize_uncompressed(&value.proof[..])?)
+                    Proof::ArtProof(ARTProof::deserialize_compressed(&value.proof[..])?)
                 }
                 GroupOperation::RemoveMember(_) => {
-                    Proof::ArtProof(ARTProof::deserialize_uncompressed(&value.proof[..])?)
+                    Proof::ArtProof(ARTProof::deserialize_compressed(&value.proof[..])?)
                 }
                 GroupOperation::KeyUpdate(_) => {
-                    Proof::ArtProof(ARTProof::deserialize_uncompressed(&value.proof[..])?)
+                    Proof::ArtProof(ARTProof::deserialize_compressed(&value.proof[..])?)
                 }
                 _ => Proof::SchnorrSignature(value.proof),
             }
@@ -110,7 +110,7 @@ impl TryFrom<Frame> for zero_art_proto::Frame {
         let proof = match value.proof {
             Proof::ArtProof(art_proof) => {
                 let mut art_proof_bytes = Vec::new();
-                art_proof.serialize_uncompressed(&mut art_proof_bytes)?;
+                art_proof.serialize_compressed(&mut art_proof_bytes)?;
                 art_proof_bytes
             }
             Proof::SchnorrSignature(signature) => signature,

@@ -162,7 +162,7 @@ impl GroupContext {
         let mut leaf_secret = Vec::new();
         self.art
             .secret_key
-            .serialize_uncompressed(&mut leaf_secret)?;
+            .serialize_compressed(&mut leaf_secret)?;
         let art = self.art.serialize()?;
         let stk = self.stk.to_vec();
         Ok((
@@ -180,7 +180,7 @@ impl GroupContext {
         let mut leaf_secret = Vec::new();
         self.art
             .secret_key
-            .serialize_uncompressed(&mut leaf_secret)?;
+            .serialize_compressed(&mut leaf_secret)?;
         let art = self.art.serialize()?;
         let stk = self.stk.to_vec();
         Ok((
@@ -318,7 +318,7 @@ impl GroupContext {
                 }
 
                 let owner_public_key =
-                    CortadoAffine::deserialize_uncompressed(frame.frame_tbs().nonce())?;
+                    CortadoAffine::deserialize_compressed(frame.frame_tbs().nonce())?;
 
                 frame.verify_schnorr::<Sha3_256>(owner_public_key)?;
 
@@ -628,7 +628,7 @@ impl GroupContext {
 
         // Serialize proof
         let mut proof_bytes = Vec::new();
-        proof.serialize_uncompressed(&mut proof_bytes)?;
+        proof.serialize_compressed(&mut proof_bytes)?;
 
         frame.proof = proof_bytes;
 
@@ -768,7 +768,7 @@ impl GroupContext {
         let mut identity_public_key_bytes = Vec::new();
         self.identity_key_pair
             .public_key
-            .serialize_uncompressed(&mut identity_public_key_bytes)?;
+            .serialize_compressed(&mut identity_public_key_bytes)?;
 
         let mut frame_tbs = builders::FrameTbsBuilder::new()
             .epoch(self.epoch)
@@ -950,12 +950,12 @@ mod tests {
         let mut public_key_1_bytes = Vec::new();
         key_pairs[1]
             .0
-            .serialize_uncompressed(&mut public_key_1_bytes)
+            .serialize_compressed(&mut public_key_1_bytes)
             .unwrap();
         let mut public_key_3_bytes = Vec::new();
         key_pairs[3]
             .0
-            .serialize_uncompressed(&mut public_key_3_bytes)
+            .serialize_compressed(&mut public_key_3_bytes)
             .unwrap();
 
         identified_invites.get(&public_key_1_bytes).unwrap();
@@ -1012,7 +1012,7 @@ mod tests {
         // .unwrap();
 
         let (leaf_secret, art, stk, epoch, group_info) = group_context.into_parts().unwrap();
-        let leaf_secret = ScalarField::deserialize_uncompressed(&leaf_secret[..]).unwrap();
+        let leaf_secret = ScalarField::deserialize_compressed(&leaf_secret[..]).unwrap();
         let group_info = zero_art_proto::GroupInfo::decode(&group_info[..]).unwrap();
         let mut group_context = GroupContext::from_parts(
             key_pairs[0].1,
@@ -1138,7 +1138,7 @@ mod tests {
         // assert!(paylaods.len() != 0);
 
         // let (leaf_secret, art, stk, epoch, group_info) = group_context.into_parts().unwrap();
-        // let leaf_secret = ScalarField::deserialize_uncompressed(&leaf_secret[..]).unwrap();
+        // let leaf_secret = ScalarField::deserialize_compressed(&leaf_secret[..]).unwrap();
         // let group_info = zero_art_proto::GroupInfo::decode(&group_info[..]).unwrap();
         // let mut group_context = GroupContext::from_parts(
         //     key_pairs[0].1,
