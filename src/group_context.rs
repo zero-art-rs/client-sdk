@@ -708,6 +708,12 @@ impl PendingGroupContext {
         Ok(frame)
     }
 
+    pub fn sign_with_tk(&self, msg: &[u8]) -> Result<Vec<u8>> {
+        let tk = self.0.state.art.get_root_key()?;
+        let tk_public_key = (CortadoAffine::generator() * tk.key).into_affine();
+        Ok(schnorr::sign(&vec![tk.key], &vec![tk_public_key], msg)?)
+    }
+
     pub fn upgrade(mut self) -> GroupContext {
         self.0.commit_state();
         self.0
