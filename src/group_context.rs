@@ -5,7 +5,7 @@ use ark_std::UniformRand;
 use ark_std::rand::SeedableRng;
 use ark_std::rand::prelude::StdRng;
 use art::traits::ARTPublicView;
-use art::types::{LeafIter, ProverArtefacts, PublicART};
+use art::types::{LeafIter, ProverArtefacts, PublicART, VerifierArtefacts};
 use art::{
     traits::{ARTPrivateAPI, ARTPublicAPI},
     types::{BranchChanges, PrivateART},
@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use crate::error::{Error, Result};
 use crate::models::frame::{Frame, GroupOperation};
-use crate::models::group_info::{GroupInfo, GroupMembers, User};
+use crate::models::group_info::{public_key_to_id, GroupInfo, GroupMembers, User};
 use crate::models::invite::Invite;
 use crate::models::payload::{GroupActionPayload, Payload};
 use crate::proof_system::ProofSystem;
@@ -174,6 +174,17 @@ impl GroupState {
 
         Ok(())
     }
+
+    fn verifier_artefacts(&self, changes: &BranchChanges<CortadoAffine>) -> Result<VerifierArtefacts<CortadoAffine>> {
+        Ok(self.art.compute_artefacts_for_verification(changes)?)
+    }
+
+    fn owner_public_key(&self) -> Result<CortadoAffine> {
+        Ok(LeafIter::new(self.art.get_root())
+            .next()
+            .ok_or(Error::InvalidInput)?
+            .get_public_key())
+    }
 }
 
 pub struct GroupContext {
@@ -312,16 +323,14 @@ impl GroupContext {
             frame.verify_schnorr::<Sha3_256>(tree_public_key)?;
 
             let protected_payload =
-                models::protected_payload::ProtectedPayload::decode(&crate::utils::decrypt(
-                    &self.state.stk,
+                models::protected_payload::ProtectedPayload::decode(&self.state.decrypt(
                     frame.frame_tbs().protected_payload(),
                     &frame.frame_tbs().associated_data::<Sha3_256>()?,
                 )?)?;
 
             let sender = match protected_payload.protected_payload_tbs().sender() {
                 models::protected_payload::Sender::UserId(id) => self
-                    .state
-                    .group_info
+                    .group_info()
                     .members()
                     .get(id)
                     .ok_or(Error::InvalidSender)?,
@@ -331,7 +340,6 @@ impl GroupContext {
             protected_payload.verify::<Sha3_256>(sender.public_key())?;
 
             if sender.public_key() == self.identity_key_pair.public_key {
-                println!("Own frame");
                 return Ok(vec![]);
             }
 
@@ -346,10 +354,9 @@ impl GroupContext {
                 return Ok(vec![]);
             }
             models::frame::GroupOperation::AddMember(changes) => {
-                if self.state.group_info.members().len() == 0 {
+                if self.group_info().members().len() == 0 {
                     let protected_payload = models::protected_payload::ProtectedPayload::decode(
-                        &crate::utils::decrypt(
-                            &self.state.stk,
+                        &self.state.decrypt(
                             frame.frame_tbs().protected_payload(),
                             &frame.frame_tbs().associated_data::<Sha3_256>()?,
                         )?,
@@ -387,9 +394,8 @@ impl GroupContext {
 
                 let verifier_artefacts = self
                     .state
-                    .art
-                    .compute_artefacts_for_verification(&changes)?;
-                let owner_leaf_public_key = self.group_owner_leaf_public_key()?;
+                    .verifier_artefacts(&changes)?;
+                let owner_leaf_public_key = self.state.owner_public_key()?;
 
                 frame.verify_art::<Sha3_256>(
                     &self.proof_system,
@@ -398,7 +404,6 @@ impl GroupContext {
                 )?;
 
                 self.state.update_art(&changes)?;
-                self.state.advance_epoch()?;
 
                 // TODO: Implement rollback mechanism, because after tree update there can be unrecoverable errors
                 let protected_payload =
@@ -417,6 +422,7 @@ impl GroupContext {
                 };
 
                 protected_payload.verify::<Sha3_256>(sender.public_key())?;
+                self.state.is_last_sender = false;
 
                 return Ok(protected_payload
                     .protected_payload_tbs()
@@ -433,8 +439,7 @@ impl GroupContext {
 
                 let verifier_artefacts = self
                     .state
-                    .art
-                    .compute_artefacts_for_verification(&changes)?;
+                    .verifier_artefacts(&changes)?;
 
                 let old_leaf_public_key = self.state.art.get_node(&changes.node_index)?.public_key;
                 frame.verify_art::<Sha3_256>(
@@ -444,7 +449,6 @@ impl GroupContext {
                 )?;
 
                 self.state.update_art(&changes)?;
-                self.state.advance_epoch()?;
 
                 let protected_payload =
                     models::protected_payload::ProtectedPayload::decode(&self.state.decrypt(
@@ -479,6 +483,8 @@ impl GroupContext {
                 protected_payload.verify::<Sha3_256>(sender.public_key())?;
 
                 self.state.group_info = group_info;
+
+                                self.state.is_last_sender = false;
 
                 return Ok(protected_payload
                     .protected_payload_tbs()
@@ -518,13 +524,6 @@ impl GroupContext {
 
     pub fn commit_state(&mut self) {
         self.state = self.pending_state.clone()
-    }
-
-    fn group_owner_leaf_public_key(&self) -> Result<CortadoAffine> {
-        Ok(LeafIter::new(self.state.art.get_root())
-            .next()
-            .ok_or(Error::InvalidInput)?
-            .get_public_key())
     }
 
     fn create_invite(
@@ -598,19 +597,12 @@ impl GroupContext {
         payloads: Vec<models::payload::Payload>,
         group_operation: Option<models::frame::GroupOperation>,
     ) -> Result<models::frame::FrameTbs> {
+        
         let protected_payload_tbs = models::protected_payload::ProtectedPayloadTbs::new(
             0,
             Utc::now(),
             payloads,
-            models::protected_payload::Sender::UserId(
-                state
-                    .group_info
-                    .members()
-                    .get_by_public_key(&self.identity_key_pair.public_key)
-                    .ok_or(Error::InvalidInput)?
-                    .id()
-                    .to_string(),
-            ),
+            models::protected_payload::Sender::UserId(public_key_to_id(self.identity_key_pair.public_key)),
         );
         let protected_payload =
             protected_payload_tbs.sign::<Sha3_256>(self.identity_key_pair.secret_key)?;

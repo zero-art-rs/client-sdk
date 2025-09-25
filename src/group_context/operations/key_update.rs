@@ -33,18 +33,18 @@ impl GroupContext {
 
         let (changes, prover_artefacts) = pending_state.update_key(&leaf_secret)?;
         debug!("Key updated: {:?}", changes);
-        pending_state.advance_epoch()?;
         debug!("Epoch advanced");
-
+        
         let frame = self
-            .create_frame_tbs(
-                &pending_state,
-                payloads,
-                Some(GroupOperation::KeyUpdate(changes)),
-            )?
-            .prove_art::<Sha3_256>(&mut self.proof_system, prover_artefacts, old_secret)?;
-        debug!("Frame created");
-        trace!("Frame: {:?}", frame);
+        .create_frame_tbs(
+            &pending_state,
+            payloads,
+            Some(GroupOperation::KeyUpdate(changes)),
+        )?
+        .prove_art::<Sha3_256>(&mut self.proof_system, prover_artefacts, old_secret)?;
+    debug!("Frame created");
+    trace!("Frame: {:?}", frame);
+    
 
         pending_state.is_last_sender = true;
         self.pending_state = pending_state;

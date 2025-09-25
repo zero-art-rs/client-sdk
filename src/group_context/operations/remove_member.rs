@@ -58,7 +58,6 @@ impl GroupContext {
         // 2. Make node blank in ART and recompute STK
         let (changes, prover_artefacts) =
             pending_state.make_blank(&leaf_public_key, &temporary_leaf_secret)?;
-        pending_state.advance_epoch()?;
 
         // let removed_user = self
         //     .group_info

@@ -133,9 +133,8 @@ fn test_add_identified_member() {
     let mut secrets_factory = create_secrets_factory(&mut rng);
 
     let (owner_public_key, owner_secret_key) = secrets_factory.generate_secret_with_public_key();
-    let (member_1_identity_public_key, _) = secrets_factory.generate_secret_with_public_key();
-    let (member_1_spk_public_key, _) = secrets_factory.generate_secret_with_public_key();
-    let (member_2_identity_public_key, _) = secrets_factory.generate_secret_with_public_key();
+    let (member_identity_public_key, member_identity_secret_key) = secrets_factory.generate_secret_with_public_key();
+    let (member_spk_public_key, member_spk_secret_key) = secrets_factory.generate_secret_with_public_key();
 
     let owner = User::new(
         "owner".to_string(),
@@ -157,11 +156,11 @@ fn test_add_identified_member() {
     let (mut group_context, _) =
         GroupContext::new(owner_secret_key, group_info).expect("Failed to create GroupContext");
 
-    let (_add_member_1_frame, _member_1_invite) = group_context
+    let (frame_0, invite) = group_context
         .add_member(
             Invitee::Identified {
-                identity_public_key: member_1_identity_public_key,
-                spk_public_key: Some(member_1_spk_public_key),
+                identity_public_key: member_identity_public_key,
+                spk_public_key: Some(member_spk_public_key),
             },
             vec![],
         )
@@ -174,15 +173,40 @@ fn test_add_identified_member() {
         "Add member should increment epoch"
     );
 
-    let (_add_member_2_frame, _member_2_invite) = group_context
-        .add_member(
-            Invitee::Identified {
-                identity_public_key: member_2_identity_public_key,
-                spk_public_key: None,
-            },
-            vec![],
-        )
-        .expect("Failed to add member in group context");
+    let new_leaf_secret = ScalarField::rand(&mut rng);
+    let frame_1 = group_context.key_update(new_leaf_secret, vec![]).expect("Failed to key update");
+    assert_eq!(group_context.epoch(), 1);
+    let public_art = PublicART { root: group_context.state.art.root.clone(), generator: CortadoAffine::generator() };
+    group_context.commit_state();
+    assert_eq!(group_context.epoch(), 2);
+
+    let invite_context = InviteContext::new(member_identity_secret_key, Some(member_spk_secret_key), invite).expect("Failed to create InviritContext");
+    let mut pending_group_context = invite_context.upgrade(public_art).expect("Failed to upgrade invite context to pending group context");
+    pending_group_context.process_frame(frame_0).expect("Failed to process sync frame");
+    pending_group_context.process_frame(frame_1).expect("Failed to sync 2");
+    
+    let user = User::new(
+        "user".to_string(),
+        member_identity_public_key,
+        vec![],
+        zero_art_proto::Role::Write,
+    );
+
+    let frame_2 = pending_group_context.join_group_as(user).expect("Failed to join group");
+    let mut member_group_context = pending_group_context.upgrade();
+
+    println!("{}", frame_2.frame_tbs().epoch());
+    group_context.process_frame(frame_2).expect("Failed to process accept invite flow");
+
+    let new_leaf_secret = ScalarField::rand(&mut rng);
+    let frame_3 = member_group_context.key_update(new_leaf_secret, vec![]).expect("awd");
+    member_group_context.commit_state();
+
+    group_context.process_frame(frame_3).expect("awdawdawd");
+    assert_eq!(group_context.epoch(), 4);
+    println!("IS LAST?: {:?}", group_context.state.is_last_sender);
+    let frame_4 = group_context.create_frame(vec![]).expect("awd");
+    assert!(matches!(frame_4.frame_tbs().group_operation(), Some(GroupOperation::KeyUpdate(_))))
 }
 
 #[test]
