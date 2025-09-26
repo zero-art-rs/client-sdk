@@ -749,6 +749,8 @@ impl PendingGroupContext {
         println!("User: {:?}", user);
         println!("Id: {:?}", public_key_to_id(self.0.identity_key_pair.public_key));
         println!("jgrps public key: {:?}", self.0.identity_key_pair.public_key);
+        println!("Userkeyid: {:?}", public_key_to_id(user.public_key()));
+
 
         let group_action_payload =
             models::payload::Payload::Action(models::payload::GroupActionPayload::JoinGroup(user));
