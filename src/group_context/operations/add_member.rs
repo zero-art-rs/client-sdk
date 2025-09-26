@@ -71,6 +71,7 @@ impl GroupContext {
                 &pending_state,
                 payloads,
                 Some(GroupOperation::AddMember(changes)),
+                None,
             )?
             .prove_art::<Sha3_256>(
                 &mut self.proof_system,

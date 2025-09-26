@@ -23,7 +23,7 @@ use crate::models::group_info::{public_key_to_id, GroupInfo, GroupMembers, User}
 use crate::models::invite::Invite;
 use crate::models::payload::{GroupActionPayload, Payload};
 use crate::proof_system::ProofSystem;
-use crate::utils::derive_stage_key;
+use crate::utils::{derive_stage_key, serialize};
 use crate::{models, proof_system};
 use ark_std::rand::thread_rng;
 
@@ -185,6 +185,41 @@ impl GroupState {
             .ok_or(Error::InvalidInput)?
             .get_public_key())
     }
+
+    // fn add_member(&mut self, leaf_secret: ScalarField, user: User) -> Result<(BranchChanges<CortadoAffine>, ProverArtefacts<CortadoAffine>)> {
+    //     let member_leafs = LeafIter::new(self.art.get_root())
+    //         .filter(|node| !node.is_blank)
+    //         .enumerate()
+    //         .map(|(i, node)| {
+    //             let member = self
+    //                 .group_info
+    //                 .members()
+    //                 .get_by_index(i)
+    //                 .expect("Inconsistent group info");
+    //             (node.public_key, member.0.to_string())
+    //         })
+    //         .collect::<HashMap<CortadoAffine, String>>();
+
+
+    //     let indexes = LeafIter::new(self.art.get_root())
+    //         .filter(|node| !node.is_blank)
+    //         .enumerate()
+    //         .map(|(i, node)| (values.get(&node.public_key).expect("").to_string(), i))
+    //         .collect::<HashMap<String, usize>>();
+        
+    //         Err(Error::InvalidInput)
+    //     }
+
+    // fn map_leafs_to_users(&self) -> HashMap<CortadoAffine, String> {
+        
+    // }
+
+    // fn map_uids_to_indexes_by_leafs(
+    //     &self,
+    //     values: HashMap<CortadoAffine, String>,
+    // ) -> HashMap<String, usize> {
+        
+    // }
 }
 
 pub struct GroupContext {
@@ -228,6 +263,7 @@ impl GroupContext {
                     root: group_context.state.art.root.clone(),
                     generator: CortadoAffine::generator(),
                 })),
+                Some(serialize(group_context.identity_key_pair.public_key)?)
             )?
             .prove_schnorr::<Sha3_256>(identity_secret_key)?;
 
@@ -517,7 +553,7 @@ impl GroupContext {
 
         let tk = self.state.art.get_root_key()?;
         let frame = self
-            .create_frame_tbs(&self.state, payloads, None)?
+            .create_frame_tbs(&self.state, payloads, None, None)?
             .prove_schnorr::<Sha3_256>(tk.key)?;
         Ok(frame)
     }
@@ -596,6 +632,7 @@ impl GroupContext {
         state: &GroupState,
         payloads: Vec<models::payload::Payload>,
         group_operation: Option<models::frame::GroupOperation>,
+        nonce: Option<Vec<u8>>,
     ) -> Result<models::frame::FrameTbs> {
         
         let protected_payload_tbs = models::protected_payload::ProtectedPayloadTbs::new(
@@ -610,7 +647,7 @@ impl GroupContext {
         let mut frame_tbs = models::frame::FrameTbs::new(
             state.group_info.id(),
             state.epoch,
-            vec![],
+            nonce.unwrap_or_default(),
             group_operation,
             vec![],
         );

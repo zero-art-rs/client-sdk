@@ -40,6 +40,7 @@ impl GroupContext {
             &pending_state,
             payloads,
             Some(GroupOperation::KeyUpdate(changes)),
+            None,
         )?
         .prove_art::<Sha3_256>(&mut self.proof_system, prover_artefacts, old_secret)?;
     debug!("Frame created");

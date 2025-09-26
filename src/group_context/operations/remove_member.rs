@@ -76,6 +76,7 @@ impl GroupContext {
                 &pending_state,
                 payloads,
                 Some(GroupOperation::RemoveMember(changes)),
+                None,
             )?
             .prove_art::<Sha3_256>(
                 &mut self.proof_system,
