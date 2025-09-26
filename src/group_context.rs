@@ -731,6 +731,14 @@ impl PendingGroupContext {
     pub fn from_state(identity_secret_key: ScalarField, state: GroupState) -> Result<Self> {
         Ok(Self(GroupContext::from_state(identity_secret_key, state)?))
     }
+
+    pub fn epoch(&self) -> u64 {
+        self.0.state.epoch
+    }
+
+    pub fn group_info(&self) -> &GroupInfo {
+        &self.0.state.group_info
+    }
 }
 
 pub struct InviteContext {
