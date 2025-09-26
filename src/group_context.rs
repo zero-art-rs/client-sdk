@@ -420,9 +420,14 @@ impl GroupContext {
                         return Err(Error::InvalidInput);
                     }
 
-                    for i in group_infos[0].members().iter() {
-                        self.state.group_info.members_mut().insert_user(i.clone());
+
+                    let mut group_info = group_infos[0].clone();
+
+                    for i in self.state.group_info.members().iter() {
+                        group_info.members_mut().insert_user(i.clone());
                     }
+
+                    self.state.group_info = group_info;
 
                     return Ok(protected_payload
                         .protected_payload_tbs()
