@@ -787,6 +787,14 @@ impl InviteContext {
         )?)
     }
 
+    pub fn group_id(&self) -> Uuid {
+        self.group_id
+    }
+
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
     pub fn upgrade(self, art: PublicART<CortadoAffine>) -> Result<PendingGroupContext> {
         let state = GroupState {
             art: PrivateART::from_public_art(art, self.leaf_secret)?,
