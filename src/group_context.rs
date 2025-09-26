@@ -788,7 +788,8 @@ impl PendingGroupContext {
 
         group_info.members_mut().insert_user(self.1.unwrap());
 
-        self.0.state.group_info = group_info;
+        self.0.state.group_info = group_info.clone();
+        self.0.pending_state.group_info = group_info.clone();
 
         self.0
     }
