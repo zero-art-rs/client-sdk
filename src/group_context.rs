@@ -474,24 +474,28 @@ impl GroupContext {
                 }
 
                 let verifier_artefacts = self
-                    .state
-                    .verifier_artefacts(&changes)?;
-
-                let old_leaf_public_key = self.state.art.get_node(&changes.node_index)?.public_key;
+                .state
+                .verifier_artefacts(&changes)?;
+            
+            let old_leaf_public_key = self.state.art.get_node(&changes.node_index)?.public_key;
+                println!("Before art verify");
                 frame.verify_art::<Sha3_256>(
                     &self.proof_system,
                     verifier_artefacts,
                     old_leaf_public_key,
                 )?;
 
+                println!("Before art update");
                 self.state.update_art(&changes)?;
 
+                println!("Before protected payload decoding");
                 let protected_payload =
                     models::protected_payload::ProtectedPayload::decode(&self.state.decrypt(
                         frame.frame_tbs().protected_payload(),
                         &frame.frame_tbs().associated_data::<Sha3_256>()?,
                     )?)?;
 
+                println!("Before new users");
                 let new_users: Vec<models::group_info::User> = protected_payload
                     .protected_payload_tbs()
                     .payloads()
@@ -503,12 +507,15 @@ impl GroupContext {
                         _ => None,
                     })
                     .collect();
+                println!("Users: {:?}", new_users);
+                
 
                 let mut group_info = self.group_info().clone();
                 for user in new_users {
                     group_info.members_mut().insert_user(user);
                 }
 
+                println!("Before sender get");
                 let sender = match protected_payload.protected_payload_tbs().sender() {
                     models::protected_payload::Sender::UserId(id) => {
                         group_info.members().get(&id).ok_or(Error::InvalidInput)?
@@ -516,6 +523,7 @@ impl GroupContext {
                     _ => unimplemented!(),
                 };
 
+                println!("Before pk verify");
                 protected_payload.verify::<Sha3_256>(sender.public_key())?;
 
                 self.state.group_info = group_info;
