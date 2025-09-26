@@ -516,8 +516,10 @@ impl GroupContext {
                 }
 
                 println!("Before sender get");
+                println!("GroupInfo: {:?}", group_info);
                 let sender = match protected_payload.protected_payload_tbs().sender() {
                     models::protected_payload::Sender::UserId(id) => {
+                        println!("Id: {:?}", id);
                         group_info.members().get(&id).ok_or(Error::InvalidInput)?
                     }
                     _ => unimplemented!(),
