@@ -743,7 +743,7 @@ fn compute_invite_leaf_secret(
     }
 }
 
-pub struct PendingGroupContext(GroupContext);
+pub struct PendingGroupContext(GroupContext, Option<User>);
 
 impl PendingGroupContext {
     pub fn process_frame(&mut self, frame: Frame) -> Result<Vec<Payload>> {
@@ -759,8 +759,9 @@ impl PendingGroupContext {
 
 
         let group_action_payload =
-            models::payload::Payload::Action(models::payload::GroupActionPayload::JoinGroup(user));
+            models::payload::Payload::Action(models::payload::GroupActionPayload::JoinGroup(user.clone()));
 
+        self.1 = Some(user);
 
         let frame = self.0.key_update(leaf_secret, vec![group_action_payload])?;
 
@@ -775,6 +776,9 @@ impl PendingGroupContext {
 
     pub fn upgrade(mut self) -> GroupContext {
         self.0.commit_state();
+
+        self.0.state.group_info.members_mut().insert_user(self.1.unwrap());
+
         self.0
     }
 
@@ -788,7 +792,7 @@ impl PendingGroupContext {
     }
 
     pub fn from_state(identity_secret_key: ScalarField, state: GroupState) -> Result<Self> {
-        Ok(Self(GroupContext::from_state(identity_secret_key, state)?))
+        Ok(Self(GroupContext::from_state(identity_secret_key, state)?, None))
     }
 
     pub fn epoch(&self) -> u64 {
@@ -908,6 +912,6 @@ impl InviteContext {
             proof_system: proof_system::ProofSystem::default(),
             rng: context_rng,
             identity_key_pair: self.identity_key_pair,
-        }))
+        }, None))
     }
 }
