@@ -795,6 +795,10 @@ impl InviteContext {
         self.epoch
     }
 
+    pub fn leaf_public_key(&self) -> CortadoAffine {
+        (CortadoAffine::generator() * self.leaf_secret).into_affine()
+    }
+
     pub fn upgrade(self, art: PublicART<CortadoAffine>) -> Result<PendingGroupContext> {
         let state = GroupState {
             art: PrivateART::from_public_art(art, self.leaf_secret)?,
