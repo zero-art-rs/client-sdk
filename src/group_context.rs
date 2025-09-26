@@ -247,12 +247,18 @@ impl GroupContext {
             is_last_sender: true,
         };
 
+        let identity_key_pair = KeyPair::from_secret_key(identity_secret_key);
+
+        println!("GroupContext: Generated public key: {:?}", identity_key_pair.public_key);
+        println!("GroupContext: Generated secret key: {:?}", identity_key_pair.secret_key);
+
+
         let group_context = Self {
             pending_state: state.clone(),
             state,
             proof_system: ProofSystem::default(),
             rng: context_rng,
-            identity_key_pair: KeyPair::from_secret_key(identity_secret_key),
+            identity_key_pair,
         };
 
         let frame = group_context
@@ -809,6 +815,11 @@ impl InviteContext {
         invite: Invite,
     ) -> Result<Self> {
         let identity_key_pair = KeyPair::from_secret_key(identity_secret_key);
+        
+        println!("InviteContext: Generated public key: {:?}", identity_key_pair.public_key);
+        println!("InviteContext: Generated secret key: {:?}", identity_key_pair.secret_key);
+
+        
         println!("keys: {:?}", identity_key_pair.public_key);
 
         invite.verify::<Sha3_256>(invite.invite_tbs().inviter_public_key())?;
