@@ -746,9 +746,12 @@ impl PendingGroupContext {
 
     pub fn join_group_as(&mut self, user: User) -> Result<Frame> {
         let leaf_secret = ScalarField::rand(&mut thread_rng());
+        println!("User: {:?}", user);
+        println!("Id: {:?}", public_key_to_id(self.0.identity_key_pair.public_key));
 
         let group_action_payload =
             models::payload::Payload::Action(models::payload::GroupActionPayload::JoinGroup(user));
+
 
         let frame = self.0.key_update(leaf_secret, vec![group_action_payload])?;
 
