@@ -783,9 +783,12 @@ impl PendingGroupContext {
     }
 
     pub fn upgrade(mut self) -> GroupContext {
+        let mut group_info = self.0.group_info().clone();
         self.0.commit_state();
 
-        self.0.state.group_info.members_mut().insert_user(self.1.unwrap());
+        group_info.members_mut().insert_user(self.1.unwrap());
+
+        self.0.state.group_info = group_info;
 
         self.0
     }
