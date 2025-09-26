@@ -748,6 +748,7 @@ impl PendingGroupContext {
         let leaf_secret = ScalarField::rand(&mut thread_rng());
         println!("User: {:?}", user);
         println!("Id: {:?}", public_key_to_id(self.0.identity_key_pair.public_key));
+        println!("jgrps public key: {:?}", self.0.identity_key_pair.public_key);
 
         let group_action_payload =
             models::payload::Payload::Action(models::payload::GroupActionPayload::JoinGroup(user));
@@ -806,6 +807,7 @@ impl InviteContext {
         invite: Invite,
     ) -> Result<Self> {
         let identity_key_pair = KeyPair::from_secret_key(identity_secret_key);
+        println!("keys: {:?}", identity_key_pair.public_key);
 
         invite.verify::<Sha3_256>(invite.invite_tbs().inviter_public_key())?;
 
