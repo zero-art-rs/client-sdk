@@ -718,6 +718,19 @@ impl PendingGroupContext {
         self.0.commit_state();
         self.0
     }
+
+        // Parts
+    pub fn into_state(self) -> GroupState {
+        self.0.into_state()
+    }
+
+    pub fn to_state(&self) -> GroupState {
+        self.0.to_state()
+    }
+
+    pub fn from_state(identity_secret_key: ScalarField, state: GroupState) -> Result<Self> {
+        Ok(Self(GroupContext::from_state(identity_secret_key, state)?))
+    }
 }
 
 pub struct InviteContext {
