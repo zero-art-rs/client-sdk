@@ -47,15 +47,15 @@ impl GroupContext {
         let (changes, prover_artefacts) = pending_state.append_leaf(&leaf_secret)?;
         debug!("Node added to ART: {:?}", changes);
 
-        let user = User::new(
-            String::from("Invited"),
-            CortadoAffine::default(),
-            vec![],
-            zero_art_proto::Role::Write,
-        );
-        member_leaf_map.insert(leaf_public_key, user.id().to_string());
+        // let user = User::new(
+        //     String::from("Invited"),
+        //     CortadoAffine::default(),
+        //     vec![],
+        //     zero_art_proto::Role::Write,
+        // );
+        // member_leaf_map.insert(leaf_public_key, user.id().to_string());
         let members_order = self.map_uids_to_indexes_by_leafs(member_leaf_map);
-        pending_state.group_info.members_mut().insert_user(user);
+        // pending_state.group_info.members_mut().insert_user(user);
         pending_state
             .group_info
             .members_mut()
