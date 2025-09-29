@@ -1,15 +1,14 @@
 [package]
-name = "awesome-client-sdk"
+name = "zrt-client-sdk"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-zk = { git = "ssh://git@github.com/zk-messenger/project-m.git" }
-art = { git = "ssh://git@github.com/zk-messenger/project-m.git" }
-# art = { path = "../project-m/crates/art" }
-crypto = { git = "ssh://git@github.com/zk-messenger/project-m.git" }
-cortado = { git = "ssh://git@github.com/zk-messenger/project-m.git" }
-bulletproofs = { version = "5.0.0", git="https://github.com/zk-messenger/bulletproofs"}
+zrt-zk = { git = "ssh://git@github.com/zero-art-rs/core.git" }
+zrt-art = { git = "ssh://git@github.com/zero-art-rs/core.git" }
+zrt-crypto = { git = "ssh://git@github.com/zero-art-rs/core.git" }
+cortado = { git = "ssh://git@github.com/zero-art-rs/core.git" }
+bulletproofs = { version = "5.0.0", git="https://github.com/zero-art-rs/bulletproofs", features=["yoloproofs"] }
 prost = "0.14.1"
 prost-types = "0.14.1"
 ark-std = "0.5.0"
@@ -31,9 +30,6 @@ indexmap = "2.11.1"
 uuid = { version = "1.18.1", features = ["v4"] }
 tracing = "0.1.41"
 hex = "0.4.3"
-
-[patch.crates-io]
-aead = { path = "./patches/aead-0.5.2-fixed" }
 
 [build-dependencies]
 prost-build = "0.14.1"

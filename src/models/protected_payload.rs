@@ -1,7 +1,7 @@
 use ark_ec::{AffineRepr, CurveGroup};
 use chrono::{DateTime, Utc};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
-use crypto::schnorr;
+use zrt_crypto::schnorr;
 use prost::Message;
 use sha3::Digest;
 

@@ -1,5 +1,5 @@
 use ark_serialize::SerializationError;
-use art::errors::ARTError;
+use zrt_art::errors::ARTError;
 use bulletproofs::r1cs::R1CSError;
 use prost::{DecodeError, UnknownEnumValue};
 use thiserror::Error;
@@ -11,7 +11,7 @@ pub enum Error {
     #[error("Serialization error")]
     SerializationError(#[from] SerializationError),
     #[error("Cryptography error")]
-    CryptoError(#[from] crypto::CryptoError),
+    CryptoError(#[from] zrt_crypto::CryptoError),
     #[error("Decode error")]
     DecodeError(#[from] DecodeError),
     #[error("HKDF error")]

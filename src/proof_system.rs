@@ -2,12 +2,12 @@ use ark_ec::{AffineRepr, CurveGroup};
 use ark_ed25519::EdwardsAffine as Ed25519Affine;
 use ark_std::rand::prelude::StdRng;
 use ark_std::rand::{SeedableRng, thread_rng};
-use art::types::{ProverArtefacts, VerifierArtefacts};
+use zrt_art::types::{ProverArtefacts, VerifierArtefacts};
 use bulletproofs::PedersenGens;
 use bulletproofs::r1cs::R1CSError;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use curve25519_dalek::scalar::Scalar;
-use zk::art::{ARTProof, art_prove, art_verify};
+use zrt_zk::art::{ARTProof, art_prove, art_verify};
 use zkp::toolbox::cross_dleq::PedersenBasis;
 use zkp::toolbox::dalek_ark::ristretto255_to_ark;
 

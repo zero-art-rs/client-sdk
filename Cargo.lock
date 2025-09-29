@@ -5,6 +5,8 @@ version = 4
 [[package]]
 name = "aead"
 version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d122413f284cf2d62fb1b7db97e02edb8cda96d769b16e443a4f6195e35662b0"
 dependencies = [
  "crypto-common",
  "generic-array",
@@ -373,34 +375,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
-name = "art"
-version = "0.1.1"
-source = "git+ssh://git@github.com/zk-messenger/project-m.git#944139d9a9468f0f39d1e13b4a8c42c847501e03"
-dependencies = [
- "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-ed25519",
- "ark-ff 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-std",
- "bulletproofs 5.0.0",
- "cortado",
- "criterion",
- "curve25519-dalek",
- "display_tree",
- "log",
- "postcard",
- "rand 0.9.2",
- "serde",
- "serde_bytes",
- "serde_json",
- "thiserror 2.0.16",
- "tracing",
- "tracing-subscriber",
- "zk",
- "zkp",
-]
-
-[[package]]
 name = "atomic-polyfill"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -414,39 +388,6 @@ name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
-
-[[package]]
-name = "awesome-client-sdk"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-ed25519",
- "ark-ff 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-std",
- "art",
- "bulletproofs 5.0.0",
- "chrono",
- "cortado",
- "crypto",
- "curve25519-dalek",
- "hex",
- "hkdf",
- "indexmap",
- "prost",
- "prost-build",
- "prost-types",
- "rand 0.9.2",
- "rand_core 0.9.3",
- "sha3",
- "static_assertions",
- "thiserror 2.0.16",
- "tracing",
- "uuid",
- "zk",
- "zkp",
-]
 
 [[package]]
 name = "bitflags"
@@ -466,7 +407,7 @@ dependencies = [
 [[package]]
 name = "bulletproofs"
 version = "5.0.0"
-source = "git+https://github.com/zk-messenger/bulletproofs#1e95af1139deea191de7f79ed139b3092eb9e541"
+source = "git+https://github.com/zero-art-rs/bulletproofs#1e95af1139deea191de7f79ed139b3092eb9e541"
 dependencies = [
  "byteorder",
  "clear_on_drop",
@@ -529,9 +470,9 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
 name = "cc"
-version = "1.2.38"
+version = "1.2.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80f41ae168f955c12fb8960b057d70d0ca153fb83182b57d86380443527be7e9"
+checksum = "e1354349954c6fc9cb0deab020f27f783cf0b604e8bb754dc4658ecf0d29c35f"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -633,7 +574,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
 dependencies = [
- "thiserror 2.0.16",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -645,7 +586,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 [[package]]
 name = "cortado"
 version = "0.1.0"
-source = "git+ssh://git@github.com/zk-messenger/project-m.git#944139d9a9468f0f39d1e13b4a8c42c847501e03"
+source = "git+ssh://git@github.com/zero-art-rs/core.git#c4b95f3c5dde28f79dcaf2681411d3058c57c6c2"
 dependencies = [
  "ark-algebra-test-templates",
  "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
@@ -733,21 +674,6 @@ name = "crunchy"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
-
-[[package]]
-name = "crypto"
-version = "0.1.0"
-source = "git+ssh://git@github.com/zk-messenger/project-m.git#944139d9a9468f0f39d1e13b4a8c42c847501e03"
-dependencies = [
- "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "cortado",
- "hkdf",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "sha3",
- "thiserror 2.0.16",
- "zkp",
-]
 
 [[package]]
 name = "crypto-common"
@@ -894,7 +820,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.0",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -1470,9 +1396,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.40"
+version = "1.0.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1885c039570dc00dcb4ff087a89e185fd56bae234ddc7f056a945bf36467248d"
+checksum = "ce25767e7b499d1b604768e7cde645d14cc8584231ea6b295e9c9eb22c02e1d1"
 dependencies = [
  "proc-macro2",
 ]
@@ -1610,7 +1536,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.0",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -1648,9 +1574,9 @@ checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
 
 [[package]]
 name = "serde"
-version = "1.0.226"
+version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0dca6411025b24b60bfa7ec1fe1f8e710ac09782dca409ee8237ba74b51295fd"
+checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
@@ -1668,18 +1594,18 @@ dependencies = [
 
 [[package]]
 name = "serde_core"
-version = "1.0.226"
+version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba2ba63999edb9dac981fb34b3e5c0d111a69b0924e253ed29d83f7c99e966a4"
+checksum = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad"
 dependencies = [
  "serde_derive",
 ]
 
 [[package]]
 name = "serde_derive"
-version = "1.0.226"
+version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8db53ae22f34573731bafa1db20f04027b2d25e02d8205921b569171699cdb33"
+checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1800,7 +1726,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.0",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -1814,11 +1740,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.16"
+version = "2.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3467d614147380f2e4e374161426ff399c91084acd2363eaf549172b3d5e60c0"
+checksum = "f63587ca0f12b72a0600bcba1d40081f830876000bb46dd2337a3051618f4fc8"
 dependencies = [
- "thiserror-impl 2.0.16",
+ "thiserror-impl 2.0.17",
 ]
 
 [[package]]
@@ -1834,9 +1760,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.16"
+version = "2.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c5e1be1c48b9172ee610da68fd9cd2770e7a4056cb3fc98710ee6906f0c7960"
+checksum = "3ff15c8ecd7de3849db632e14d18d2571fa09dfc5ed93479bc4485c7a517c913"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2077,14 +2003,14 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.0",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
 name = "windows-core"
-version = "0.62.0"
+version = "0.62.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57fe7168f7de578d2d8a05b07fd61870d2e73b4020e9f49aa00da8471723497c"
+checksum = "6844ee5416b285084d3d3fffd743b925a6c9385455f64f6d4fa3031c4c2749a9"
 dependencies = [
  "windows-implement",
  "windows-interface",
@@ -2095,9 +2021,9 @@ dependencies = [
 
 [[package]]
 name = "windows-implement"
-version = "0.60.0"
+version = "0.60.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a47fddd13af08290e67f4acabf4b459f647552718f683a7b415d290ac744a836"
+checksum = "edb307e42a74fb6de9bf3a02d9712678b22399c87e6fa869d6dfcd8c1b7754e0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2106,9 +2032,9 @@ dependencies = [
 
 [[package]]
 name = "windows-interface"
-version = "0.59.1"
+version = "0.59.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd9211b69f8dcdfa817bfd14bf1c97c9188afa36f4750130fcdf3f400eca9fa8"
+checksum = "c0abd1ddbc6964ac14db11c7213d6532ef34bd9aa042c2e5935f59d7908b46a5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2150,9 +2076,9 @@ dependencies = [
 
 [[package]]
 name = "windows-sys"
-version = "0.61.0"
+version = "0.61.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e201184e40b2ede64bc2ea34968b28e33622acdbbf37104f0e4a33f7abe657aa"
+checksum = "6f109e41dd4a3c848907eb83d5a42ea98b3769495597450cf6d153507b166f0f"
 dependencies = [
  "windows-link",
 ]
@@ -2268,30 +2194,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zk"
-version = "0.1.0"
-source = "git+ssh://git@github.com/zk-messenger/project-m.git#944139d9a9468f0f39d1e13b4a8c42c847501e03"
-dependencies = [
- "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-ed25519",
- "ark-ff 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-std",
- "bulletproofs 5.0.0",
- "chrono",
- "cortado",
- "curve25519-dalek",
- "hex",
- "merlin",
- "once_cell",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "tracing",
- "tracing-subscriber",
- "zkp",
-]
-
-[[package]]
 name = "zkp"
 version = "0.10.0"
 source = "git+https://github.com/juja256/zkp#2ad090e1c4c1fa4af137f140b4ac9cb73b84c2d9"
@@ -2311,7 +2213,107 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "serde_derive",
- "thiserror 2.0.16",
+ "thiserror 2.0.17",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "zrt-art"
+version = "0.1.1"
+source = "git+ssh://git@github.com/zero-art-rs/core.git#c4b95f3c5dde28f79dcaf2681411d3058c57c6c2"
+dependencies = [
+ "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
+ "ark-ed25519",
+ "ark-ff 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
+ "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
+ "ark-std",
+ "bulletproofs 5.0.0",
+ "cortado",
+ "criterion",
+ "curve25519-dalek",
+ "display_tree",
+ "log",
+ "postcard",
+ "rand 0.9.2",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tracing",
+ "tracing-subscriber",
+ "zkp",
+ "zrt-zk",
+]
+
+[[package]]
+name = "zrt-client-sdk"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
+ "ark-ed25519",
+ "ark-ff 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
+ "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
+ "ark-std",
+ "bulletproofs 5.0.0",
+ "chrono",
+ "cortado",
+ "curve25519-dalek",
+ "hex",
+ "hkdf",
+ "indexmap",
+ "prost",
+ "prost-build",
+ "prost-types",
+ "rand 0.9.2",
+ "rand_core 0.9.3",
+ "sha3",
+ "static_assertions",
+ "thiserror 2.0.17",
+ "tracing",
+ "uuid",
+ "zkp",
+ "zrt-art",
+ "zrt-crypto",
+ "zrt-zk",
+]
+
+[[package]]
+name = "zrt-crypto"
+version = "0.1.0"
+source = "git+ssh://git@github.com/zero-art-rs/core.git#c4b95f3c5dde28f79dcaf2681411d3058c57c6c2"
+dependencies = [
+ "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
+ "cortado",
+ "hkdf",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "sha3",
+ "thiserror 2.0.17",
+ "zkp",
+]
+
+[[package]]
+name = "zrt-zk"
+version = "0.1.0"
+source = "git+ssh://git@github.com/zero-art-rs/core.git#c4b95f3c5dde28f79dcaf2681411d3058c57c6c2"
+dependencies = [
+ "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
+ "ark-ed25519",
+ "ark-ff 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
+ "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
+ "ark-std",
+ "bulletproofs 5.0.0",
+ "chrono",
+ "cortado",
+ "curve25519-dalek",
+ "hex",
+ "merlin",
+ "once_cell",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "tracing",
+ "tracing-subscriber",
+ "zkp",
 ]

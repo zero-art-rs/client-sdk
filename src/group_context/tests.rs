@@ -1,5 +1,5 @@
 use ark_std::rand::{Rng, RngCore};
-use art::types::PublicART;
+use zrt_art::types::PublicART;
 use uuid::Uuid;
 
 use crate::{
@@ -8,17 +8,15 @@ use crate::{
         group_info::{GroupMembers, User},
         invite::Invitee,
     },
-    secrets_factory::SecretsFactory,
     zero_art_proto,
 };
 
 use super::*;
 
-fn create_secrets_factory(rng: &mut StdRng) -> SecretsFactory {
-    let mut secrets_factory_seed = [0u8; 32];
-    rng.fill(&mut secrets_factory_seed);
-
-    SecretsFactory::new(secrets_factory_seed)
+fn generate_key_pair(rng: &mut StdRng) -> (CortadoAffine, ScalarField) {
+    let secret_key = ScalarField::rand(rng);
+    let public_key = (CortadoAffine::generator() * secret_key).into_affine();
+    (public_key, secret_key)
 }
 
 fn generate_uuid(rng: &mut StdRng) -> Uuid {
@@ -38,9 +36,7 @@ fn test_create_group() {
     // Use determined seed for reproducability
     let mut rng = StdRng::seed_from_u64(0);
 
-    let mut secrets_factory = create_secrets_factory(&mut rng);
-
-    let (owner_public_key, owner_secret_key) = secrets_factory.generate_secret_with_public_key();
+    let (owner_public_key, owner_secret_key) = generate_key_pair(&mut rng);
 
     let owner = User::new(
         "owner".to_string(),
@@ -130,11 +126,9 @@ fn test_add_identified_member() {
     // Use determined seed for reproducability
     let mut rng = StdRng::seed_from_u64(0);
 
-    let mut secrets_factory = create_secrets_factory(&mut rng);
-
-    let (owner_public_key, owner_secret_key) = secrets_factory.generate_secret_with_public_key();
-    let (member_identity_public_key, member_identity_secret_key) = secrets_factory.generate_secret_with_public_key();
-    let (member_spk_public_key, member_spk_secret_key) = secrets_factory.generate_secret_with_public_key();
+    let (owner_public_key, owner_secret_key) = generate_key_pair(&mut rng);
+    let (member_identity_public_key, member_identity_secret_key) = generate_key_pair(&mut rng);
+    let (member_spk_public_key, member_spk_secret_key) = generate_key_pair(&mut rng);
 
     let owner = User::new(
         "owner".to_string(),
@@ -246,7 +240,7 @@ fn test_process_frame_() {}
 //     // Predefined key pairs
 //     let mut key_pairs = Vec::new();
 //     for _ in 0..20 {
-//         key_pairs.push(secrets_factory.generate_secret_with_public_key());
+//         key_pairs.push(generate_key_pair(&mut rng));
 //     }
 
 //     let owner_user = models::group_info::User::new(
@@ -401,7 +395,7 @@ fn test_process_frame_() {}
 //     // Predefined key pairs
 //     let mut key_pairs = Vec::new();
 //     for _ in 0..20 {
-//         key_pairs.push(secrets_factory.generate_secret_with_public_key());
+//         key_pairs.push(generate_key_pair(&mut rng));
 //     }
 
 //     let owner_user = models::group_info::User::new(
@@ -484,7 +478,7 @@ fn test_process_frame_() {}
 //     // Predefined key pairs
 //     let mut key_pairs = Vec::new();
 //     for _ in 0..20 {
-//         key_pairs.push(secrets_factory.generate_secret_with_public_key());
+//         key_pairs.push(generate_key_pair(&mut rng));
 //     }
 
 //     let owner_user = models::group_info::User::new(
@@ -560,13 +554,13 @@ fn test_process_frame_() {}
 
 //     let mut secrets_factory = secrets_factory::SecretsFactory::new(secrets_factory_seed);
 
-//     let (public_key_1, secret_key_1) = secrets_factory.generate_secret_with_public_key();
+//     let (public_key_1, secret_key_1) = generate_key_pair(&mut rng);
 //     println!("PublicKey 1: {}", public_key_1);
-//     let (public_key_2, secret_key_2) = secrets_factory.generate_secret_with_public_key();
+//     let (public_key_2, secret_key_2) = generate_key_pair(&mut rng);
 //     println!("PublicKey 2: {}", public_key_2);
-//     let (public_key_3, secret_key_3) = secrets_factory.generate_secret_with_public_key();
+//     let (public_key_3, secret_key_3) = generate_key_pair(&mut rng);
 //     println!("PublicKey 3: {}", public_key_3);
-//     let (public_key_4, secret_key_4) = secrets_factory.generate_secret_with_public_key();
+//     let (public_key_4, secret_key_4) = generate_key_pair(&mut rng);
 //     println!("PublicKey 4: {}", public_key_4);
 
 //     let (mut private_art, _) = PrivateART::new_art_from_secrets(

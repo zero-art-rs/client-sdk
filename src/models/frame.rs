@@ -1,14 +1,14 @@
 use std::fmt::Debug;
 
 use ark_ec::{AffineRepr, CurveGroup};
-use art::types::{BranchChanges, ProverArtefacts, PublicART, VerifierArtefacts};
+use zrt_art::types::{BranchChanges, ProverArtefacts, PublicART, VerifierArtefacts};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
-use crypto::schnorr;
+use zrt_crypto::schnorr;
 use prost::Message;
 use sha3::{Digest, Sha3_256};
 
 use uuid::Uuid;
-use zk::art::ARTProof;
+use zrt_zk::art::ARTProof;
 
 use crate::{
     error::{Error, Result},

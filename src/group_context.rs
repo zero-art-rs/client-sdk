@@ -4,15 +4,15 @@ use ark_ec::{AffineRepr, CurveGroup};
 use ark_std::UniformRand;
 use ark_std::rand::SeedableRng;
 use ark_std::rand::prelude::StdRng;
-use art::traits::ARTPublicView;
-use art::types::{LeafIter, ProverArtefacts, PublicART, VerifierArtefacts};
-use art::{
+use zrt_art::traits::ARTPublicView;
+use zrt_art::types::{LeafIter, ProverArtefacts, PublicART, VerifierArtefacts};
+use zrt_art::{
     traits::{ARTPrivateAPI, ARTPublicAPI},
     types::{BranchChanges, PrivateART},
 };
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
-use crypto::schnorr;
+use zrt_crypto::schnorr;
 
 use sha3::Sha3_256;
 use uuid::Uuid;

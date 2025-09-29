@@ -1,5 +1,5 @@
 use ark_ff::UniformRand;
-use art::{traits::ARTPublicView, types::LeafIter};
+use zrt_art::{traits::ARTPublicView, types::LeafIter};
 use sha3::Sha3_256;
 
 use crate::{

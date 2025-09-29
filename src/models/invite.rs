@@ -1,7 +1,7 @@
 use crate::{error::{Error, Result}, utils::{deserialize, serialize}};
 use ark_ec::{AffineRepr, CurveGroup};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
-use crypto::schnorr;
+use zrt_crypto::schnorr;
 use prost::Message;
 use sha3::Digest;
 use uuid::Uuid;

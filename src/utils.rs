@@ -5,7 +5,7 @@ use aes_gcm::{
 use ark_ff::PrimeField;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
-use crypto::x3dh::{x3dh_a, x3dh_b};
+use zrt_crypto::x3dh::{x3dh_a, x3dh_b};
 use hkdf::Hkdf;
 use sha3::Sha3_256;
 
