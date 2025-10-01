@@ -1,18 +1,19 @@
 use std::fmt::Debug;
 
 use ark_ec::{AffineRepr, CurveGroup};
-use zrt_art::types::{BranchChanges, ProverArtefacts, PublicART, VerifierArtefacts};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
-use zrt_crypto::schnorr;
 use prost::Message;
 use sha3::{Digest, Sha3_256};
+use zrt_art::types::{BranchChanges, ProverArtefacts, PublicART, VerifierArtefacts};
+use zrt_crypto::schnorr;
 
 use uuid::Uuid;
 use zrt_zk::art::ARTProof;
 
 use crate::{
     error::{Error, Result},
-    proof_system, zero_art_proto,
+    proof_system::get_proof_system,
+    zero_art_proto,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -52,13 +53,12 @@ impl Frame {
 
     pub fn verify_art<D: Digest>(
         &self,
-        proof_system: &proof_system::ProofSystem,
         verifier_artefacts: VerifierArtefacts<CortadoAffine>,
         public_key: CortadoAffine,
     ) -> Result<()> {
         match &self.proof {
             Proof::SchnorrSignature(_) => return Err(Error::InvalidVerificationMethod),
-            Proof::ArtProof(proof) => proof_system.verify(
+            Proof::ArtProof(proof) => get_proof_system().verify(
                 verifier_artefacts,
                 &vec![public_key],
                 &D::digest(self.frame_tbs.encode_to_vec()?),
@@ -217,11 +217,10 @@ impl FrameTbs {
 
     pub fn prove_art<D: Digest>(
         self,
-        proof_system: &mut proof_system::ProofSystem,
         prover_artefacts: ProverArtefacts<CortadoAffine>,
         secret_key: ScalarField,
     ) -> Result<Frame> {
-        let proof = proof_system.prove(
+        let proof = get_proof_system().prove(
             prover_artefacts,
             &vec![secret_key],
             &D::digest(self.encode_to_vec()?),

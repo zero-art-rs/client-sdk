@@ -1,10 +1,13 @@
-use crate::{error::{Error, Result}, utils::{deserialize, serialize}};
+use crate::{
+    error::{Error, Result},
+    utils::{deserialize, serialize},
+};
 use ark_ec::{AffineRepr, CurveGroup};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
-use zrt_crypto::schnorr;
 use prost::Message;
 use sha3::Digest;
 use uuid::Uuid;
+use zrt_crypto::schnorr;
 
 use crate::zero_art_proto;
 
@@ -142,10 +145,8 @@ impl TryFrom<zero_art_proto::InviteTbs> for InviteTbs {
     type Error = Error;
 
     fn try_from(value: zero_art_proto::InviteTbs) -> Result<Self> {
-        let inviter_public_key =
-            deserialize(&value.identity_public_key)?;
-        let ephemeral_public_key =
-            deserialize(&value.ephemeral_public_key)?;
+        let inviter_public_key = deserialize(&value.identity_public_key)?;
+        let ephemeral_public_key = deserialize(&value.ephemeral_public_key)?;
         Ok(Self {
             invitee: value
                 .invite
@@ -164,10 +165,8 @@ impl TryFrom<InviteTbs> for zero_art_proto::InviteTbs {
     fn try_from(value: InviteTbs) -> Result<Self> {
         Ok(Self {
             protected_invite_data: value.protected_invite_data,
-            identity_public_key: serialize(value
-            .inviter_public_key)?,
-            ephemeral_public_key: serialize(value
-            .ephemeral_public_key)?,
+            identity_public_key: serialize(value.inviter_public_key)?,
+            ephemeral_public_key: serialize(value.ephemeral_public_key)?,
             invite: Some(value.invitee.try_into()?),
         })
     }
@@ -188,14 +187,11 @@ impl TryFrom<zero_art_proto::invite_tbs::Invite> for Invitee {
     fn try_from(value: zero_art_proto::invite_tbs::Invite) -> Result<Self> {
         match value {
             zero_art_proto::invite_tbs::Invite::IdentifiedInvite(inv) => {
-                let identity_public_key =
-                    deserialize(&inv.identity_public_key)?;
+                let identity_public_key = deserialize(&inv.identity_public_key)?;
                 let spk_public_key = if inv.spk_public_key.len() == 0 {
                     None
                 } else {
-                    Some(deserialize(
-                        &inv.spk_public_key,
-                    )?)
+                    Some(deserialize(&inv.spk_public_key)?)
                 };
                 Ok(Invitee::Identified {
                     identity_public_key,

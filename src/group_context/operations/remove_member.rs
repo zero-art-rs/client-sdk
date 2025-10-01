@@ -1,5 +1,4 @@
 use ark_ff::UniformRand;
-use zrt_art::{traits::ARTPublicView, types::LeafIter};
 use sha3::Sha3_256;
 
 use crate::{
@@ -24,9 +23,9 @@ impl GroupContext {
     #[instrument(skip(self, payloads))]
     pub fn remove_member(
         &mut self,
-        public_key: CortadoAffine,
+        user_id: &str,
         mut payloads: Vec<Payload>,
-    ) -> Result<Frame> {
+    ) -> Result<(Frame, Option<User>)> {
         info!("Start remove_member");
 
         let mut pending_state = self.state.clone();
@@ -35,17 +34,18 @@ impl GroupContext {
         let temporary_leaf_secret: ark_ff::Fp<ark_ff::MontBackend<cortado::FrConfig, 4>, 4> =
             ScalarField::rand(&mut self.rng);
 
-        // let index_to_remove = self
-        //     .group_info
-        //     .members()
-        //     .get_index_by_public_key(&public_key)
-        //     .ok_or(Error::InvalidInput)?;
+        let leaf_index = pending_state
+            .group_info
+            .members()
+            .get_index_by_id(user_id)
+            .ok_or(Error::InvalidInput)?;
 
-        let index_to_remove = 0;
+        let removed_user = pending_state.group_info.members_mut().remove(user_id);
 
-        let leaf_public_keys = LeafIter::new(pending_state.art.get_root())
+        let leaf_public_keys = pending_state
+            .iter_leaves()
             .enumerate()
-            .filter(|(i, node)| !node.is_blank && *i == index_to_remove)
+            .filter(|(i, node)| !node.is_blank && *i == leaf_index)
             .map(|(_, node)| node.public_key)
             .collect::<Vec<CortadoAffine>>();
 
@@ -59,16 +59,8 @@ impl GroupContext {
         let (changes, prover_artefacts) =
             pending_state.make_blank(&leaf_public_key, &temporary_leaf_secret)?;
 
-        // let removed_user = self
-        //     .group_info
-        //     .members_mut()
-        //     .remove_by_public_key(&public_key)
-        //     .ok_or(Error::InvalidInput)?;
-
-        // self.reorder_members();
-
         payloads.push(Payload::Action(GroupActionPayload::RemoveMember(
-            User::default(),
+            removed_user.clone().unwrap_or_default(),
         )));
 
         let frame = self
@@ -78,15 +70,12 @@ impl GroupContext {
                 Some(GroupOperation::RemoveMember(changes)),
                 None,
             )?
-            .prove_art::<Sha3_256>(
-                &mut self.proof_system,
-                prover_artefacts,
-                pending_state.art.secret_key,
-            )?;
+            .prove_art::<Sha3_256>(prover_artefacts, pending_state.art.secret_key)?;
 
-        self.pending_state.is_last_sender = true;
+        pending_state.is_last_sender = true;
+        self.pending_state = pending_state;
 
         info!("remove_member finished successfully");
-        Ok(frame)
+        Ok((frame, removed_user))
     }
 }

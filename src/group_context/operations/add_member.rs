@@ -5,10 +5,10 @@ use tracing::{debug, info, instrument, trace};
 
 use crate::{
     error::Result,
-    group_context::GroupContext,
+    group_context::{GroupContext, map_users_to_leaf_ids},
     models::{
         frame::{Frame, GroupOperation},
-        group_info::User,
+        group_info::{User, public_key_to_id},
         invite::{Invite, Invitee},
         payload::{GroupActionPayload, Payload},
     },
@@ -26,6 +26,7 @@ impl GroupContext {
         info!("Start add_member");
         trace!("Invitee: {:?}", invitee);
 
+        // Pending state is ephemeral state
         let mut pending_state = self.state.clone();
 
         // 1. Generate ephemeral secret key
@@ -41,25 +42,35 @@ impl GroupContext {
 
         // 3. Add node to ART and advance epoch
 
-        // Create mapping for leaf public keys to member ids
-        let mut member_leaf_map = self.map_leafs_to_users();
+        // Since leafs in tree can be added also not only to right
+        // we need to reorder group members to follow non blank leafs order
+        let mut leaf_member_map = pending_state.map_leaves_to_users();
 
         let (changes, prover_artefacts) = pending_state.append_leaf(&leaf_secret)?;
         debug!("Node added to ART: {:?}", changes);
 
-        // let user = User::new(
-        //     String::from("Invited"),
-        //     CortadoAffine::default(),
-        //     vec![],
-        //     zero_art_proto::Role::Write,
-        // );
-        // member_leaf_map.insert(leaf_public_key, user.id().to_string());
-        let members_order = self.map_uids_to_indexes_by_leafs(member_leaf_map);
-        // pending_state.group_info.members_mut().insert_user(user);
+        let user = User::new_with_id(
+            public_key_to_id(leaf_public_key),
+            String::from("Invited"),
+            CortadoAffine::default(),
+            vec![],
+            zero_art_proto::Role::Write,
+        );
+        let user_id = user.id().to_string();
+
+        // Since leafs in tree can be added also not only to right
+        // we need to reorder group members to follow non blank leafs order
         pending_state
             .group_info
             .members_mut()
-            .sort_by_keys_indexes(members_order);
+            .insert(user_id.clone(), user);
+        leaf_member_map.insert(leaf_public_key, user_id);
+
+        let members_order = map_users_to_leaf_ids(pending_state.iter_leaves(), leaf_member_map);
+        pending_state
+            .group_info
+            .members_mut()
+            .reorder(members_order);
 
         // 4. Add payload with group info
         payloads.push(Payload::Action(GroupActionPayload::InviteMember(
@@ -73,11 +84,7 @@ impl GroupContext {
                 Some(GroupOperation::AddMember(changes)),
                 None,
             )?
-            .prove_art::<Sha3_256>(
-                &mut self.proof_system,
-                prover_artefacts,
-                pending_state.art.secret_key,
-            )?;
+            .prove_art::<Sha3_256>(prover_artefacts, pending_state.art.secret_key)?;
         debug!("Frame created");
         trace!("Frame: {:?}", frame);
 

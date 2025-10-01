@@ -1,5 +1,7 @@
 use crate::{
-    error::{Error, Result}, utils::{deserialize, serialize}, zero_art_proto
+    error::{Error, Result},
+    utils::{deserialize, serialize},
+    zero_art_proto,
 };
 use chrono::{DateTime, Utc};
 use cortado::CortadoAffine;
@@ -111,29 +113,56 @@ impl From<GroupInfo> for zero_art_proto::GroupInfo {
 pub struct GroupMembers(IndexMap<String, User>);
 
 impl GroupMembers {
-    pub fn insert_user(&mut self, user: User) {
-        self.0.insert(user.id().to_string(), user);
+    pub fn insert(&mut self, id: String, user: User) {
+        self.0.insert(id, user);
+    }
+
+    pub fn remove(&mut self, id: &str) -> Option<User> {
+        self.0.shift_remove(id)
+    }
+
+    /// Find index of `id` and then replace this key-value with (user.id, user)
+    pub fn replace(&mut self, id: &str, user: User) -> Option<User> {
+        if let Some(index) = self.0.get_index_of(id) {
+            let (_, replaced_user) = self.0.swap_remove_index(index)?;
+
+            let (insert_index, _) = self.0.insert_full(user.id().to_string(), user);
+
+            if insert_index != index {
+                self.0.swap_indices(insert_index, index);
+            }
+
+            Some(replaced_user)
+        } else {
+            None
+        }
+        // self.0.insert(id, user);
+        // Some(self.0.swap_remove_index(index)?.1)
+    }
+
+    pub fn reorder(&mut self, keys_indexes: HashMap<String, usize>) {
+        self.0
+            .sort_by_key(|k, _| *keys_indexes.get(k).unwrap_or(&usize::MAX));
+    }
+
+    pub fn get(&self, id: &str) -> Option<&User> {
+        self.0.get(id)
     }
 
     pub fn get_by_index(&self, index: usize) -> Option<(&String, &User)> {
         self.0.get_index(index)
     }
 
+    pub fn get_index_by_id(&self, id: &str) -> Option<usize> {
+        self.0.get_index_of(id)
+    }
+
     pub fn get_by_public_key(&self, public_key: &CortadoAffine) -> Option<&User> {
         self.0.get(&public_key_to_id(*public_key))
     }
 
-    pub fn sort_by_keys_indexes(&mut self, keys_indexes: HashMap<String, usize>) {
-        self.0
-            .sort_by_key(|k, _| *keys_indexes.get(k).unwrap_or(&usize::MAX));
-    }
-
     pub fn len(&self) -> usize {
         self.0.len()
-    }
-
-    pub fn get(&self, id: &str) -> Option<&User> {
-        self.0.get(id)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &User> {
@@ -156,7 +185,7 @@ impl TryFrom<Vec<zero_art_proto::User>> for GroupMembers {
 
         for proto_user in value {
             let user: User = proto_user.try_into()?;
-            members.insert_user(user);
+            members.insert(user.id().to_string(), user);
         }
 
         Ok(members)
@@ -166,6 +195,16 @@ impl TryFrom<Vec<zero_art_proto::User>> for GroupMembers {
 impl From<GroupMembers> for Vec<zero_art_proto::User> {
     fn from(value: GroupMembers) -> Self {
         value.0.into_values().map(|user| user.into()).collect()
+    }
+}
+
+impl From<Vec<User>> for GroupMembers {
+    fn from(users: Vec<User>) -> Self {
+        let mut gm = GroupMembers::default();
+        for user in users.into_iter() {
+            gm.insert(user.id().to_string(), user);
+        }
+        gm
     }
 }
 
@@ -188,6 +227,22 @@ impl User {
     ) -> Self {
         Self {
             id: public_key_to_id(public_key),
+            name,
+            public_key,
+            metadata,
+            role,
+        }
+    }
+
+    pub fn new_with_id(
+        id: String,
+        name: String,
+        public_key: CortadoAffine,
+        metadata: Vec<u8>,
+        role: zero_art_proto::Role,
+    ) -> Self {
+        Self {
+            id,
             name,
             public_key,
             metadata,
