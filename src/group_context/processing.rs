@@ -1,5 +1,6 @@
 use ark_ec::CurveGroup;
 use sha3::Sha3_256;
+use tracing::{instrument, trace};
 use zrt_art::{
     traits::{ARTPrivateAPI, ARTPublicAPI, ARTPublicView},
     types::LeafIter,
@@ -16,6 +17,7 @@ use crate::{
 };
 
 impl GroupContext {
+    #[instrument(skip_all)]
     pub fn process_frame(
         &mut self,
         frame: models::frame::Frame,
@@ -212,6 +214,9 @@ impl GroupContext {
                 if self.state.epoch >= frame.frame_tbs().epoch() {
                     return Ok(vec![]);
                 }
+
+                trace!("State epoch: {:?}", self.state.epoch);
+                trace!("Frame epoch: {:?}", frame.frame_tbs().epoch());
                 if self.state.epoch + 1 != frame.frame_tbs().epoch() {
                     return Err(Error::InvalidEpoch);
                 }

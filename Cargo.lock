@@ -81,9 +81,9 @@ checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 
 [[package]]
 name = "anstyle"
-version = "1.0.11"
+version = "1.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "862ed96ca487e809f1c8e5a8447f6ee2cf102f846893800b20cebdf541fc6bbd"
+checksum = "5192cca8006f1fd4f7237516f40fa183bb07f8fbdfedaa0036de5ea9b0b45e78"
 
 [[package]]
 name = "anyhow"
@@ -586,7 +586,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 [[package]]
 name = "cortado"
 version = "0.1.0"
-source = "git+ssh://git@github.com/zero-art-rs/core.git#c4b95f3c5dde28f79dcaf2681411d3058c57c6c2"
+source = "git+ssh://git@github.com/zero-art-rs/core.git#bb36f1494d9e4eedaf807260232037886b0416a6"
 dependencies = [
  "ark-algebra-test-templates",
  "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
@@ -1851,9 +1851,9 @@ dependencies = [
 
 [[package]]
 name = "typenum"
-version = "1.18.0"
+version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
+checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
 name = "unicode-ident"
@@ -2175,9 +2175,9 @@ dependencies = [
 
 [[package]]
 name = "zeroize"
-version = "1.8.1"
+version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ced3678a2879b30306d323f4542626697a464a97c0a07c9aebf7ebca65cd4dde"
+checksum = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
 dependencies = [
  "zeroize_derive",
 ]
@@ -2221,7 +2221,7 @@ dependencies = [
 [[package]]
 name = "zrt-art"
 version = "0.1.1"
-source = "git+ssh://git@github.com/zero-art-rs/core.git#c4b95f3c5dde28f79dcaf2681411d3058c57c6c2"
+source = "git+ssh://git@github.com/zero-art-rs/core.git#bb36f1494d9e4eedaf807260232037886b0416a6"
 dependencies = [
  "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
  "ark-ed25519",
@@ -2284,7 +2284,7 @@ dependencies = [
 [[package]]
 name = "zrt-crypto"
 version = "0.1.0"
-source = "git+ssh://git@github.com/zero-art-rs/core.git#c4b95f3c5dde28f79dcaf2681411d3058c57c6c2"
+source = "git+ssh://git@github.com/zero-art-rs/core.git#bb36f1494d9e4eedaf807260232037886b0416a6"
 dependencies = [
  "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
  "cortado",
@@ -2299,7 +2299,7 @@ dependencies = [
 [[package]]
 name = "zrt-zk"
 version = "0.1.0"
-source = "git+ssh://git@github.com/zero-art-rs/core.git#c4b95f3c5dde28f79dcaf2681411d3058c57c6c2"
+source = "git+ssh://git@github.com/zero-art-rs/core.git#bb36f1494d9e4eedaf807260232037886b0416a6"
 dependencies = [
  "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
  "ark-ed25519",
