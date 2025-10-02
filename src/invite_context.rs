@@ -169,6 +169,11 @@ fn compute_invite_leaf_secret(
             identity_public_key,
             spk_public_key,
         } => {
+            println!("Identity public key: {:?}", identity_public_key);
+            println!("Owned identity public key: {:?}", owned_identity_public_key);
+            println!("SPK public key: {:?}", spk_public_key);
+            println!("Owned SPK public key: {:?}", owned_spk_public_key);
+
             if identity_public_key != owned_identity_public_key {
                 return Err(Error::InvalidInput);
             }
