@@ -37,6 +37,8 @@ pub enum Error {
     InvalidInput,
     #[error("Invalid group")]
     InvalidGroup,
+    #[error("Invalid length")]
+    InvalidLength,
     // #[error("Postcard error: {0}")]
     // Postcard(#[from] postcard::Error),
     // #[error("Serde JSON error: {0}")]

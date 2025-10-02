@@ -40,7 +40,7 @@ pub fn decrypt(stage_key: &[u8; 32], ciphertext: &[u8], aad: &[u8]) -> Result<Ve
 
     // AES 256 key size - 32 bytes, nonce - 12 bytes
     let mut okm = [0u8; 32 + 12];
-    h.expand(&[], &mut okm).map_err(|_| Error::InvalidInput)?;
+    h.expand(&[], &mut okm).map_err(|_| Error::InvalidLength)?;
 
     let (key, nonce) = (&okm[..32], &okm[32..]);
     let key = Key::<Aes256Gcm>::from_slice(key);
