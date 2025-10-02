@@ -77,11 +77,14 @@ impl InviteContext {
 
         println!("Invite encryption key: {:?}", invite_encryption_key);
 
-        let protected_invite_data = ProtectedInviteData::decode(&decrypt(
+        let protected_invite_data = decrypt(
             &invite_encryption_key,
             invite.invite_tbs().protected_invite_data(),
             &[],
-        )?)?;
+        )?;
+        println!("Protected invite data: {:?}", protected_invite_data);
+        let protected_invite_data = ProtectedInviteData::decode(&protected_invite_data)?;
+        println!("Protected invite data: {:?}", protected_invite_data);
 
         Ok(Self {
             identity_secret_key,
@@ -144,6 +147,7 @@ impl InviteContext {
         Ok(PendingGroupContext::from_state(
             self.identity_secret_key,
             state,
+            None,
         )?)
     }
 }

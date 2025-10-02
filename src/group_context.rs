@@ -45,6 +45,7 @@ impl KeyPair {
 }
 
 pub struct GroupContext {
+    previous_state: Option<GroupState>,
     state: GroupState,
     pending_state: GroupState,
 
@@ -72,7 +73,7 @@ impl GroupContext {
             true,
         )?;
 
-        let group_context = Self::from_state(identity_secret_key, state)?;
+        let group_context = Self::from_state(identity_secret_key, state, None)?;
 
         let frame = group_context
             .create_frame_tbs(
@@ -133,13 +134,14 @@ impl GroupContext {
         self.state.clone()
     }
 
-    pub fn from_state(identity_secret_key: ScalarField, state: GroupState) -> Result<Self> {
+    pub fn from_state(identity_secret_key: ScalarField, state: GroupState, previous_state: Option<GroupState>) -> Result<Self> {
         let context_rng = StdRng::from_rng(thread_rng()).unwrap();
         let proof_system = proof_system::ProofSystem::default();
 
         let identity_key_pair = KeyPair::from_secret_key(identity_secret_key);
 
         Ok(GroupContext {
+            previous_state,
             pending_state: state.clone(),
             state,
             identity_key_pair,
@@ -213,6 +215,8 @@ impl GroupContext {
         trace!("Invite encryption key: {:?}", invite_encryption_key);
 
         println!("Invite encryption key: {:?}", invite_encryption_key);
+
+        println!("Protected invite data: {:?}", protected_invite_data.encode_to_vec());
 
         let encrypted_invite_data = encrypt(
             &invite_encryption_key,
@@ -362,9 +366,9 @@ impl PendingGroupContext {
         self.0.to_state()
     }
 
-    pub fn from_state(identity_secret_key: ScalarField, state: GroupState) -> Result<Self> {
+    pub fn from_state(identity_secret_key: ScalarField, state: GroupState, previous_state: Option<GroupState>) -> Result<Self> {
         Ok(Self(
-            GroupContext::from_state(identity_secret_key, state)?,
+            GroupContext::from_state(identity_secret_key, state, previous_state)?,
             None,
         ))
     }
