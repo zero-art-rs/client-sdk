@@ -6,12 +6,13 @@ use crate::{
         group_info::{GroupInfo, GroupMembers},
         invite::{Invite, Invitee, ProtectedInviteData},
     },
-    utils::decrypt,
+    utils::{decrypt, hkdf},
 };
 use ark_ec::{AffineRepr, CurveGroup};
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use sha3::Sha3_256;
+use tracing::{debug, info, instrument, trace};
 use uuid::Uuid;
 use zrt_art::types::PublicART;
 use zrt_crypto::schnorr;
@@ -25,15 +26,25 @@ pub struct InviteContext {
 }
 
 impl InviteContext {
+    #[instrument(skip_all)]
     pub fn new(
         identity_secret_key: ScalarField,
         spk_secret_key: Option<ScalarField>,
         invite: Invite,
     ) -> Result<Self> {
+        info!("New invite context");
+        
+        trace!("Identity secret key: {:?}", identity_secret_key);
+        trace!("SPK secret key: {:?}", spk_secret_key);
+        trace!("Invite: {:?}", invite);
+
         invite.verify::<Sha3_256>(invite.invite_tbs().inviter_public_key())?;
+        debug!("Invite signature verified");
 
         let inviter_public_key = invite.invite_tbs().inviter_public_key();
         let ephemeral_public_key = invite.invite_tbs().ephemeral_public_key();
+        trace!("Inviter public key: {:?}", inviter_public_key);
+        trace!("Ephemeral public key: {:?}", ephemeral_public_key);
 
         let leaf_secret = compute_invite_leaf_secret(
             invite.invite_tbs().invitee(),
@@ -42,11 +53,15 @@ impl InviteContext {
             inviter_public_key,
             ephemeral_public_key,
         )?;
+        debug!("Invite leaf secret computed");
+        trace!("Invite leaf secret: {:?}", leaf_secret);
 
-        let invite_encryption_key = crate::utils::hkdf(
+        let invite_encryption_key = hkdf(
             Some(b"invite-key-derivation"),
             &crate::utils::serialize(leaf_secret)?,
         )?;
+        debug!("Invite encryption key derived");
+        trace!("Invite encryption key: {:?}", invite_encryption_key);
 
         let protected_invite_data = ProtectedInviteData::decode(&decrypt(
             &invite_encryption_key,

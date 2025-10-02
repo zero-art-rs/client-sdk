@@ -6,6 +6,7 @@ use ark_std::rand::SeedableRng;
 use ark_std::rand::prelude::StdRng;
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
+use tracing::{instrument, trace};
 use zrt_art::types::{LeafIter, PublicART};
 use zrt_art::{traits::ARTPrivateAPI, types::PrivateART};
 use zrt_crypto::schnorr;
@@ -18,7 +19,7 @@ use crate::models::frame::{Frame, GroupOperation};
 use crate::models::group_info::{GroupInfo, User, public_key_to_id};
 use crate::models::payload::Payload;
 use crate::proof_system::ProofSystem;
-use crate::utils::{derive_stage_key, serialize};
+use crate::utils::{derive_stage_key, encrypt, hkdf, serialize};
 use crate::{models, proof_system};
 use ark_std::rand::thread_rng;
 
@@ -177,6 +178,7 @@ impl GroupContext {
         self.state = self.pending_state.clone()
     }
 
+    #[instrument(skip_all)]
     fn create_invite(
         &self,
         state: &GroupState,
@@ -184,18 +186,26 @@ impl GroupContext {
         leaf_secret: ScalarField,
         ephemeral_secret_key: ScalarField,
     ) -> Result<models::invite::Invite> {
+        trace!("Group state: {:?}", state);
+        trace!("Invitee: {:?}", invitee);
+        trace!("Leaf secret: {:?}", leaf_secret);
+        trace!("Ephemeral secret key: {:?}", ephemeral_secret_key);
+
+
         let ephemeral_public_key =
             (CortadoAffine::generator() * ephemeral_secret_key).into_affine();
+        trace!("Ephemeral public key: {:?}", ephemeral_public_key);
 
         let protected_invite_data =
             models::invite::ProtectedInviteData::new(state.epoch, state.stk, state.group_info.id());
 
-        let invite_encryption_key = crate::utils::hkdf(
+        let invite_encryption_key = hkdf(
             Some(b"invite-key-derivation"),
-            &crate::utils::serialize(leaf_secret)?,
+            &serialize(leaf_secret)?,
         )?;
+        trace!("Invite encryption key: {:?}", invite_encryption_key);
 
-        let encrypted_invite_data = crate::utils::encrypt(
+        let encrypted_invite_data = encrypt(
             &invite_encryption_key,
             &protected_invite_data.encode_to_vec()?,
             &[],
@@ -209,6 +219,7 @@ impl GroupContext {
         );
 
         let invite = invite_tbs.sign::<Sha3_256>(self.identity_key_pair.secret_key)?;
+        trace!("Invite: {:?}", invite);
 
         Ok(invite)
     }
