@@ -279,6 +279,10 @@ impl User {
         self.role
     }
 
+    pub fn role_mut(&mut self) -> &mut zero_art_proto::Role {
+        &mut self.role
+    }
+
     // Serialization
     pub fn encode_to_vec(&self) -> Vec<u8> {
         let inner: zero_art_proto::User = self.clone().into();

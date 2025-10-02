@@ -20,7 +20,7 @@ use crate::models::group_info::{GroupInfo, User, public_key_to_id};
 use crate::models::payload::Payload;
 use crate::proof_system::ProofSystem;
 use crate::utils::{derive_stage_key, encrypt, hkdf, serialize};
-use crate::{models, proof_system};
+use crate::{models, proof_system, zero_art_proto};
 use ark_std::rand::thread_rng;
 
 pub mod operations;
@@ -326,8 +326,10 @@ impl PendingGroupContext {
         self.0.process_frame(frame)
     }
 
-    pub fn join_group_as(&mut self, user: User) -> Result<Frame> {
+    pub fn join_group_as(&mut self, mut user: User) -> Result<Frame> {
         let leaf_secret = ScalarField::rand(&mut thread_rng());
+
+        *user.role_mut() = zero_art_proto::Role::Write;
 
         let group_action_payload = models::payload::Payload::Action(
             models::payload::GroupActionPayload::JoinGroup(user.clone()),
