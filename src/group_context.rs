@@ -191,10 +191,17 @@ impl GroupContext {
         trace!("Leaf secret: {:?}", leaf_secret);
         trace!("Ephemeral secret key: {:?}", ephemeral_secret_key);
 
+        println!("Group state: {:?}", state);
+        println!("Invitee: {:?}", invitee);
+        println!("Leaf secret: {:?}", leaf_secret);
+        println!("Ephemeral secret key: {:?}", ephemeral_secret_key);
+
 
         let ephemeral_public_key =
             (CortadoAffine::generator() * ephemeral_secret_key).into_affine();
         trace!("Ephemeral public key: {:?}", ephemeral_public_key);
+
+        println!("Ephemeral public key: {:?}", ephemeral_public_key);
 
         let protected_invite_data =
             models::invite::ProtectedInviteData::new(state.epoch, state.stk, state.group_info.id());
@@ -204,6 +211,8 @@ impl GroupContext {
             &serialize(leaf_secret)?,
         )?;
         trace!("Invite encryption key: {:?}", invite_encryption_key);
+
+        println!("Invite encryption key: {:?}", invite_encryption_key);
 
         let encrypted_invite_data = encrypt(
             &invite_encryption_key,
@@ -220,6 +229,8 @@ impl GroupContext {
 
         let invite = invite_tbs.sign::<Sha3_256>(self.identity_key_pair.secret_key)?;
         trace!("Invite: {:?}", invite);
+
+        println!("Invite: {:?}", invite);
 
         Ok(invite)
     }

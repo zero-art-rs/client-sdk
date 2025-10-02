@@ -36,8 +36,15 @@ impl InviteContext {
         
         trace!("Identity secret key: {:?}", identity_secret_key);
         trace!("SPK secret key: {:?}", spk_secret_key);
-        trace!("Invite: {:?}", invite);
-
+        trace!("Invitee: {:?}", invite.invite_tbs().invitee());
+        
+        println!("Identity secret key: {:?}", identity_secret_key);
+        println!("SPK secret key: {:?}", spk_secret_key);
+        println!("Invitee: {:?}", invite.invite_tbs().invitee());
+        
+        
+        trace!("Invite signature: {:?}", invite.signature());
+        println!("Invite signature: {:?}", invite.signature());
         invite.verify::<Sha3_256>(invite.invite_tbs().inviter_public_key())?;
         debug!("Invite signature verified");
 
@@ -45,6 +52,9 @@ impl InviteContext {
         let ephemeral_public_key = invite.invite_tbs().ephemeral_public_key();
         trace!("Inviter public key: {:?}", inviter_public_key);
         trace!("Ephemeral public key: {:?}", ephemeral_public_key);
+
+        println!("Inviter public key: {:?}", inviter_public_key);
+        println!("Ephemeral public key: {:?}", ephemeral_public_key);
 
         let leaf_secret = compute_invite_leaf_secret(
             invite.invite_tbs().invitee(),
@@ -56,12 +66,16 @@ impl InviteContext {
         debug!("Invite leaf secret computed");
         trace!("Invite leaf secret: {:?}", leaf_secret);
 
+        println!("Invite leaf secret: {:?}", leaf_secret);
+
         let invite_encryption_key = hkdf(
             Some(b"invite-key-derivation"),
             &crate::utils::serialize(leaf_secret)?,
         )?;
         debug!("Invite encryption key derived");
         trace!("Invite encryption key: {:?}", invite_encryption_key);
+
+        println!("Invite encryption key: {:?}", invite_encryption_key);
 
         let protected_invite_data = ProtectedInviteData::decode(&decrypt(
             &invite_encryption_key,
