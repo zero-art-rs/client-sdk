@@ -60,6 +60,12 @@ pub enum Error {
     InvalidEpoch,
     #[error("Sender absent in group")]
     InvalidSender,
+
+    #[error("Postcard serialization error")]
+    PostcardError(#[from] postcard::Error),
+
+    #[error("User removed from group")]
+    UserRemovedFromGroup,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

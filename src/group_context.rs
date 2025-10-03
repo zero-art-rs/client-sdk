@@ -18,9 +18,8 @@ use crate::group_state::GroupState;
 use crate::models::frame::{Frame, GroupOperation};
 use crate::models::group_info::{GroupInfo, User, public_key_to_id};
 use crate::models::payload::Payload;
-use crate::proof_system::ProofSystem;
 use crate::utils::{derive_stage_key, encrypt, hkdf, serialize};
-use crate::{models, proof_system, zero_art_proto};
+use crate::{models, zero_art_proto};
 use ark_std::rand::thread_rng;
 
 pub mod operations;
@@ -134,9 +133,12 @@ impl GroupContext {
         self.state.clone()
     }
 
-    pub fn from_state(identity_secret_key: ScalarField, state: GroupState, previous_state: Option<GroupState>) -> Result<Self> {
+    pub fn from_state(
+        identity_secret_key: ScalarField,
+        state: GroupState,
+        previous_state: Option<GroupState>,
+    ) -> Result<Self> {
         let context_rng = StdRng::from_rng(thread_rng()).unwrap();
-        let proof_system = proof_system::ProofSystem::default();
 
         let identity_key_pair = KeyPair::from_secret_key(identity_secret_key);
 
@@ -198,7 +200,6 @@ impl GroupContext {
         println!("Leaf secret: {:?}", leaf_secret);
         println!("Ephemeral secret key: {:?}", ephemeral_secret_key);
 
-
         let ephemeral_public_key =
             (CortadoAffine::generator() * ephemeral_secret_key).into_affine();
         trace!("Ephemeral public key: {:?}", ephemeral_public_key);
@@ -208,15 +209,15 @@ impl GroupContext {
         let protected_invite_data =
             models::invite::ProtectedInviteData::new(state.epoch, state.stk, state.group_info.id());
 
-        let invite_encryption_key = hkdf(
-            Some(b"invite-key-derivation"),
-            &serialize(leaf_secret)?,
-        )?;
+        let invite_encryption_key = hkdf(Some(b"invite-key-derivation"), &serialize(leaf_secret)?)?;
         trace!("Invite encryption key: {:?}", invite_encryption_key);
 
         println!("Invite encryption key: {:?}", invite_encryption_key);
 
-        println!("Protected invite data: {:?}", protected_invite_data.encode_to_vec());
+        println!(
+            "Protected invite data: {:?}",
+            protected_invite_data.encode_to_vec()
+        );
 
         let encrypted_invite_data = encrypt(
             &invite_encryption_key,
@@ -368,7 +369,11 @@ impl PendingGroupContext {
         self.0.to_state()
     }
 
-    pub fn from_state(identity_secret_key: ScalarField, state: GroupState, previous_state: Option<GroupState>) -> Result<Self> {
+    pub fn from_state(
+        identity_secret_key: ScalarField,
+        state: GroupState,
+        previous_state: Option<GroupState>,
+    ) -> Result<Self> {
         Ok(Self(
             GroupContext::from_state(identity_secret_key, state, previous_state)?,
             None,

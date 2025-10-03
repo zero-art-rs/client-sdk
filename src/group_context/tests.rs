@@ -1,9 +1,8 @@
-use ark_std::rand::{Rng, RngCore};
+use ark_std::rand::RngCore;
 use uuid::Uuid;
 use zrt_art::types::PublicART;
 
 use crate::{
-    group_context,
     invite_context::InviteContext,
     models::{
         frame::GroupOperation,
@@ -280,8 +279,8 @@ fn test_add_remove_flow() {
 
     let (member_1_identity_public_key, member_1_identity_secret_key) = generate_key_pair(&mut rng);
     let (member_1_spk_public_key, member_1_spk_secret_key) = generate_key_pair(&mut rng);
-    let (member_2_identity_public_key, member_2_identity_secret_key) = generate_key_pair(&mut rng);
-    let (member_2_spk_public_key, member_2_spk_secret_key) = generate_key_pair(&mut rng);
+    // let (member_2_identity_public_key, member_2_identity_secret_key) = generate_key_pair(&mut rng);
+    // let (member_2_spk_public_key, member_2_spk_secret_key) = generate_key_pair(&mut rng);
 
     let (frame_0, invite) = group_context
         .add_member(
@@ -342,7 +341,7 @@ fn test_add_remove_flow() {
         .process_frame(frame_1)
         .expect("Failed to process frame");
 
-    let mut member_1_group_context = pending_group_context.upgrade();
+    let member_1_group_context = pending_group_context.upgrade();
 
     println!("GroupInfo 1: {:?}", group_context.state.group_info);
     println!("GroupInfo 2: {:?}", member_1_group_context.state.group_info);

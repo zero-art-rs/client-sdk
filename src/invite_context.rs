@@ -33,16 +33,15 @@ impl InviteContext {
         invite: Invite,
     ) -> Result<Self> {
         info!("New invite context");
-        
+
         trace!("Identity secret key: {:?}", identity_secret_key);
         trace!("SPK secret key: {:?}", spk_secret_key);
         trace!("Invitee: {:?}", invite.invite_tbs().invitee());
-        
+
         println!("Identity secret key: {:?}", identity_secret_key);
         println!("SPK secret key: {:?}", spk_secret_key);
         println!("Invitee: {:?}", invite.invite_tbs().invitee());
-        
-        
+
         trace!("Invite signature: {:?}", invite.signature());
         println!("Invite signature: {:?}", invite.signature());
         invite.verify::<Sha3_256>(invite.invite_tbs().inviter_public_key())?;

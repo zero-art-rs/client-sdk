@@ -1,10 +1,8 @@
-use ark_ec::CurveGroup;
+use ark_ec::{AffineRepr, CurveGroup};
+use cortado::CortadoAffine;
 use sha3::Sha3_256;
 use tracing::{instrument, trace};
-use zrt_art::{
-    traits::{ARTPrivateAPI, ARTPublicAPI, ARTPublicView},
-    types::LeafIter,
-};
+use zrt_art::traits::{ARTPrivateAPI, ARTPublicAPI};
 
 use crate::{
     error::{Error, Result},
@@ -232,6 +230,10 @@ impl GroupContext {
                     .get_node(&changes.node_index)
                     .map_err(|_| Error::InvalidInput)?
                     .public_key;
+
+                if leaf_public_key == (CortadoAffine::generator() * self.state.art.secret_key).into_affine() {
+                    return Err(Error::UserRemovedFromGroup)
+                }
 
                 let leaves_users = self.state.map_leaves_to_users();
 

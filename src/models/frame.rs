@@ -4,7 +4,7 @@ use ark_ec::{AffineRepr, CurveGroup};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use prost::Message;
 use sha3::{Digest, Sha3_256};
-use zrt_art::types::{BranchChanges, ProverArtefacts, PublicART, VerifierArtefacts};
+use zrt_art::types::{BranchChanges, NodeIndex, ProverArtefacts, PublicART, VerifierArtefacts};
 use zrt_crypto::schnorr;
 
 use uuid::Uuid;
@@ -285,14 +285,13 @@ impl TryFrom<FrameTbs> for zero_art_proto::FrameTbs {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub enum GroupOperation {
     Init(PublicART<CortadoAffine>),
     AddMember(BranchChanges<CortadoAffine>),
     RemoveMember(BranchChanges<CortadoAffine>),
     KeyUpdate(BranchChanges<CortadoAffine>),
-    #[default]
-    LeaveGroup,
+    LeaveGroup(NodeIndex),
     DropGroup(Vec<u8>),
 }
 
@@ -313,7 +312,9 @@ impl TryFrom<zero_art_proto::GroupOperation> for GroupOperation {
             zero_art_proto::group_operation::Operation::KeyUpdate(changes) => {
                 GroupOperation::KeyUpdate(BranchChanges::deserialize(&changes)?)
             }
-            zero_art_proto::group_operation::Operation::LeaveGroup(_) => GroupOperation::LeaveGroup,
+            zero_art_proto::group_operation::Operation::LeaveGroup(node_index) => {
+                GroupOperation::LeaveGroup(postcard::from_bytes(&node_index)?)
+            }
             zero_art_proto::group_operation::Operation::DropGroup(challenge) => {
                 GroupOperation::DropGroup(challenge)
             }
@@ -340,8 +341,10 @@ impl TryFrom<GroupOperation> for zero_art_proto::GroupOperation {
             GroupOperation::KeyUpdate(changes) => {
                 zero_art_proto::group_operation::Operation::KeyUpdate(changes.serialze()?)
             }
-            GroupOperation::LeaveGroup => {
-                zero_art_proto::group_operation::Operation::LeaveGroup(vec![])
+            GroupOperation::LeaveGroup(node_index) => {
+                zero_art_proto::group_operation::Operation::LeaveGroup(postcard::to_allocvec(
+                    &node_index,
+                )?)
             }
             GroupOperation::DropGroup(challenge) => {
                 zero_art_proto::group_operation::Operation::DropGroup(challenge)
