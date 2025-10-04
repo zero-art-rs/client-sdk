@@ -231,8 +231,10 @@ impl GroupContext {
                     .map_err(|_| Error::InvalidInput)?
                     .public_key;
 
-                if leaf_public_key == (CortadoAffine::generator() * self.state.art.secret_key).into_affine() {
-                    return Err(Error::UserRemovedFromGroup)
+                if leaf_public_key
+                    == (CortadoAffine::generator() * self.state.art.secret_key).into_affine()
+                {
+                    return Err(Error::UserRemovedFromGroup);
                 }
 
                 let leaves_users = self.state.map_leaves_to_users();
