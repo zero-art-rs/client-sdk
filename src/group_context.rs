@@ -86,7 +86,7 @@ impl GroupContext {
             )?
             .prove_schnorr::<Sha3_256>(identity_secret_key)?;
 
-        Ok((group_context, frame))
+        return Ok(frame);
     }
 
     pub fn new_with_rng(
