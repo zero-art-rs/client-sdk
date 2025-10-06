@@ -1,10 +1,8 @@
 use prost::Message;
 
 use crate::{
-    models::{
-        errors::Error,
-        group_info::{GroupInfo, User},
-    },
+    error::{Error, Result},
+    models::group_info::{GroupInfo, User},
     zero_art_proto,
 };
 
@@ -20,7 +18,7 @@ impl Payload {
         zero_art_proto::Payload::from(self.clone()).encode_to_vec()
     }
 
-    pub fn decode(data: &[u8]) -> Result<Self, Error> {
+    pub fn decode(data: &[u8]) -> Result<Self> {
         Ok(zero_art_proto::Payload::decode(data)?.try_into()?)
     }
 }
@@ -34,7 +32,7 @@ impl Default for Payload {
 impl TryFrom<zero_art_proto::Payload> for Payload {
     type Error = Error;
 
-    fn try_from(value: zero_art_proto::Payload) -> Result<Self, Self::Error> {
+    fn try_from(value: zero_art_proto::Payload) -> Result<Self> {
         let payload = match value.content.ok_or(Error::RequiredFieldAbsent)? {
             zero_art_proto::payload::Content::Action(action) => Payload::Action(action.try_into()?),
             zero_art_proto::payload::Content::Crdt(crtd) => {
@@ -92,7 +90,7 @@ impl Default for GroupActionPayload {
 impl TryFrom<zero_art_proto::GroupActionPayload> for GroupActionPayload {
     type Error = Error;
 
-    fn try_from(value: zero_art_proto::GroupActionPayload) -> Result<Self, Self::Error> {
+    fn try_from(value: zero_art_proto::GroupActionPayload) -> Result<Self> {
         let group_action_payload = match value.action.ok_or(Error::RequiredFieldAbsent)? {
             zero_art_proto::group_action_payload::Action::Init(group) => {
                 GroupActionPayload::Init(group.try_into()?)

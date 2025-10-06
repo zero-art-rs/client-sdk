@@ -1,1 +1,1 @@
-# awesome-client-sdk
+# client-sdk

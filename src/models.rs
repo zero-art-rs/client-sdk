@@ -1,4 +1,3 @@
-pub mod errors;
 pub mod frame;
 pub mod group_info;
 pub mod invite;
