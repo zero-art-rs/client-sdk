@@ -214,7 +214,6 @@ pub struct User {
     name: String,
     public_key: CortadoAffine,
     metadata: Vec<u8>,
-    // ?: Should we create separate enum?
     role: zero_art_proto::Role,
 }
 

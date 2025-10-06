@@ -18,52 +18,38 @@ pub enum Error {
     HKDFError(#[from] hkdf::InvalidLength),
     #[error("R1CS error")]
     R1CSError(#[from] R1CSError),
-
-    #[error("Invalid verificatio method")]
+    #[error("Invalid verification method")]
     InvalidVerificationMethod,
-
     #[error("Required field absent")]
     RequiredFieldAbsent,
-
     #[error("AES encryption error")]
     AesError,
-
-    #[error("awd")]
-    Errr(#[from] UnknownEnumValue),
-
+    #[error("Unknown enum value")]
+    UnknownEnumError(#[from] UnknownEnumValue),
     #[error("ART logic error")]
-    ARTLogicError,
+    ArtLogicError,
     #[error("Invalid input provided")]
     InvalidInput,
     #[error("Invalid group")]
     InvalidGroup,
     #[error("Invalid length")]
     InvalidLength,
-    // #[error("Postcard error: {0}")]
-    // Postcard(#[from] postcard::Error),
-    // #[error("Serde JSON error: {0}")]
-    // SerdeJson(#[from] serde_json::Error),
-    // #[error("Node error: {0}")]
-    // Node(#[from] ARTNodeError),
-    #[error("Can't find path to given node.")]
-    PathNotExists,
-    #[error("Can't remove the node. It isn't close enough")]
-    RemoveError,
+    #[error("Path to the given node does not exist")]
+    PathNotFound,
+    #[error("Cannot remove the node: insufficient proximity")]
+    NodeRemovalError,
     #[error("Failed to convert &[u8] into &[u8;32]: {0}")]
     ConversionError(#[from] std::array::TryFromSliceError),
     #[error("Failed to retrieve x coordinate of a point")]
-    XCoordinateError,
-    #[error("No changes provided in given BranchChanges structure")]
-    NoChanges,
-
+    PointCoordinateError,
+    #[error("No changes provided in the BranchChanges structure")]
+    NoChangesProvided,
     #[error("Invalid epoch")]
     InvalidEpoch,
-    #[error("Sender absent in group")]
-    InvalidSender,
-
+    #[error("Sender is not a member of the group")]
+    SenderNotInGroup,
     #[error("Postcard serialization error")]
     PostcardError(#[from] postcard::Error),
-
     #[error("User removed from group")]
     UserRemovedFromGroup,
 }

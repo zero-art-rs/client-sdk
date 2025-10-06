@@ -320,7 +320,7 @@ fn map_users_to_leaf_ids(
         .collect::<HashMap<String, usize>>()
 }
 
-pub struct PendingGroupContext(GroupContext, Option<User>);
+pub struct PendingGroupContext(GroupContext);
 
 impl PendingGroupContext {
     pub fn process_frame(&mut self, frame: Frame) -> Result<Vec<Payload>> {
@@ -374,10 +374,11 @@ impl PendingGroupContext {
         state: GroupState,
         previous_state: Option<GroupState>,
     ) -> Result<Self> {
-        Ok(Self(
-            GroupContext::from_state(identity_secret_key, state, previous_state)?,
-            None,
-        ))
+        Ok(Self(GroupContext::from_state(
+            identity_secret_key,
+            state,
+            previous_state,
+        )?))
     }
 
     pub fn epoch(&self) -> u64 {

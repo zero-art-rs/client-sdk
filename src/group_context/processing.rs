@@ -52,7 +52,7 @@ impl GroupContext {
                     .group_info()
                     .members()
                     .get(id)
-                    .ok_or(Error::InvalidSender)?,
+                    .ok_or(Error::SenderNotInGroup)?,
                 _ => unimplemented!(),
             };
 
