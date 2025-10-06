@@ -146,7 +146,6 @@ impl InviteContext {
         Ok(PendingGroupContext::from_state(
             self.identity_secret_key,
             state,
-            None,
         )?)
     }
 }

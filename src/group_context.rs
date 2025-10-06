@@ -44,7 +44,6 @@ impl KeyPair {
 }
 
 pub struct GroupContext {
-    previous_state: Option<GroupState>,
     state: GroupState,
     pending_state: GroupState,
 
@@ -72,7 +71,7 @@ impl GroupContext {
             true,
         )?;
 
-        let group_context = Self::from_state(identity_secret_key, state, None)?;
+        let group_context = Self::from_state(identity_secret_key, state)?;
 
         let frame = group_context
             .create_frame_tbs(
@@ -86,7 +85,7 @@ impl GroupContext {
             )?
             .prove_schnorr::<Sha3_256>(identity_secret_key)?;
 
-        return Ok(frame);
+        return Ok((group_context, frame));
     }
 
     pub fn new_with_rng(
@@ -136,14 +135,12 @@ impl GroupContext {
     pub fn from_state(
         identity_secret_key: ScalarField,
         state: GroupState,
-        previous_state: Option<GroupState>,
     ) -> Result<Self> {
         let context_rng = StdRng::from_rng(thread_rng()).unwrap();
 
         let identity_key_pair = KeyPair::from_secret_key(identity_secret_key);
 
         Ok(GroupContext {
-            previous_state,
             pending_state: state.clone(),
             state,
             identity_key_pair,
@@ -372,12 +369,10 @@ impl PendingGroupContext {
     pub fn from_state(
         identity_secret_key: ScalarField,
         state: GroupState,
-        previous_state: Option<GroupState>,
     ) -> Result<Self> {
         Ok(Self(GroupContext::from_state(
             identity_secret_key,
             state,
-            previous_state,
         )?))
     }
 
