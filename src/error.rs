@@ -52,6 +52,8 @@ pub enum Error {
     PostcardError(#[from] postcard::Error),
     #[error("User removed from group")]
     UserRemovedFromGroup,
+    #[error("User don't have permission for action")]
+    Forbidden,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

@@ -68,7 +68,7 @@ message GroupActionPayload {
 	  User join_group = 4; // join group action
 	  User change_user = 5; // user changes they metadata
 	  GroupInfo change_group = 6; // group metadata change
-	  User leave_group = 7; // member leaves group
+	  User leave_group = 7; // member leafs group
 	  User finalize_removal = 8; // finalize removal of a member
 	  // TODO: add accusations
   }

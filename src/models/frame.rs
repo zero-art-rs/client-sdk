@@ -333,13 +333,13 @@ impl TryFrom<GroupOperation> for zero_art_proto::GroupOperation {
                 zero_art_proto::group_operation::Operation::Init(art.serialize()?)
             }
             GroupOperation::AddMember(changes) => {
-                zero_art_proto::group_operation::Operation::AddMember(changes.serialze()?)
+                zero_art_proto::group_operation::Operation::AddMember(changes.serialize()?)
             }
             GroupOperation::RemoveMember(changes) => {
-                zero_art_proto::group_operation::Operation::RemoveMember(changes.serialze()?)
+                zero_art_proto::group_operation::Operation::RemoveMember(changes.serialize()?)
             }
             GroupOperation::KeyUpdate(changes) => {
-                zero_art_proto::group_operation::Operation::KeyUpdate(changes.serialze()?)
+                zero_art_proto::group_operation::Operation::KeyUpdate(changes.serialize()?)
             }
             GroupOperation::LeaveGroup(node_index) => {
                 zero_art_proto::group_operation::Operation::LeaveGroup(postcard::to_allocvec(

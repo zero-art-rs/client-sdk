@@ -7,7 +7,7 @@ use ark_std::rand::prelude::StdRng;
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use tracing::{instrument, trace};
-use zrt_art::types::{LeafIter, PublicART};
+use zrt_art::types::{ARTNode, LeafIter, LeafStatus, PublicART};
 use zrt_art::{traits::ARTPrivateAPI, types::PrivateART};
 use zrt_crypto::schnorr;
 
@@ -132,10 +132,7 @@ impl GroupContext {
         self.state.clone()
     }
 
-    pub fn from_state(
-        identity_secret_key: ScalarField,
-        state: GroupState,
-    ) -> Result<Self> {
+    pub fn from_state(identity_secret_key: ScalarField, state: GroupState) -> Result<Self> {
         let context_rng = StdRng::from_rng(thread_rng()).unwrap();
 
         let identity_key_pair = KeyPair::from_secret_key(identity_secret_key);
@@ -306,11 +303,20 @@ fn map_users_to_leaf_ids(
     leafs_to_users: HashMap<CortadoAffine, String>,
 ) -> HashMap<String, usize> {
     leafs
-        .filter(|node| !node.is_blank)
+        .filter(|node| match node {
+            ARTNode::Leaf { status, .. } => LeafStatus::Blank != *status,
+            _ => unreachable!(),
+        })
         .enumerate()
         .map(|(i, node)| {
             (
-                leafs_to_users.get(&node.public_key).expect("").to_string(),
+                leafs_to_users
+                    .get(match node {
+                        ARTNode::Leaf { public_key, .. } => public_key,
+                        _ => unreachable!(),
+                    })
+                    .expect("")
+                    .to_string(),
                 i,
             )
         })
@@ -366,14 +372,8 @@ impl PendingGroupContext {
         self.0.to_state()
     }
 
-    pub fn from_state(
-        identity_secret_key: ScalarField,
-        state: GroupState,
-    ) -> Result<Self> {
-        Ok(Self(GroupContext::from_state(
-            identity_secret_key,
-            state,
-        )?))
+    pub fn from_state(identity_secret_key: ScalarField, state: GroupState) -> Result<Self> {
+        Ok(Self(GroupContext::from_state(identity_secret_key, state)?))
     }
 
     pub fn epoch(&self) -> u64 {

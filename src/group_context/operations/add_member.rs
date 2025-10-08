@@ -44,7 +44,7 @@ impl GroupContext {
 
         // Since leafs in tree can be added also not only to right
         // we need to reorder group members to follow non blank leafs order
-        let mut leaf_member_map = pending_state.map_leaves_to_users();
+        let mut leaf_member_map = pending_state.map_leafs_to_users();
 
         let (changes, prover_artefacts) = pending_state.append_leaf(&leaf_secret)?;
         debug!("Node added to ART: {:?}", changes);
@@ -66,7 +66,7 @@ impl GroupContext {
             .insert(user_id.clone(), user);
         leaf_member_map.insert(leaf_public_key, user_id);
 
-        let members_order = map_users_to_leaf_ids(pending_state.iter_leaves(), leaf_member_map);
+        let members_order = map_users_to_leaf_ids(pending_state.iter_leafs(), leaf_member_map);
         pending_state
             .group_info
             .members_mut()

@@ -4,7 +4,10 @@ use ark_ec::AffineRepr;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use zrt_art::{
     traits::{ARTPrivateAPI, ARTPublicAPI, ARTPublicView},
-    types::{BranchChanges, LeafIter, PrivateART, ProverArtefacts, PublicART, VerifierArtefacts},
+    types::{
+        ARTNode, BranchChanges, LeafIter, LeafStatus, PrivateART, ProverArtefacts, PublicART,
+        VerifierArtefacts,
+    },
 };
 
 use crate::{
@@ -78,7 +81,7 @@ impl GroupState {
         is_last_sender: bool,
     ) -> Result<Self> {
         Ok(Self {
-            art: PrivateART::from_public_art(art, leaf_secret)?,
+            art: PrivateART::from_public_art_and_secret(art, leaf_secret)?,
             stk,
             epoch,
             group_info,
@@ -152,33 +155,67 @@ impl GroupState {
 
     pub fn owner_public_key(&self) -> Result<CortadoAffine> {
         Ok(self
-            .iter_leaves()
+            .iter_leafs()
             .next()
             .ok_or(Error::InvalidInput)?
             .get_public_key())
     }
 
-    pub fn iter_leaves(&self) -> LeafIter<'_, CortadoAffine> {
+    pub fn iter_leafs(&self) -> LeafIter<'_, CortadoAffine> {
         LeafIter::new(self.art.get_root())
     }
 
-    pub fn map_leaves_to_users(&self) -> HashMap<CortadoAffine, String> {
-        map_leaves_to_users(self.iter_leaves(), self.group_info.members())
+    pub fn map_leafs_to_users(&self) -> HashMap<CortadoAffine, String> {
+        map_leafs_to_users(self.iter_leafs(), self.group_info.members())
     }
 }
 
-fn map_leaves_to_users(
+fn map_leafs_to_users(
     leafs: LeafIter<'_, CortadoAffine>,
     group_members: &GroupMembers,
 ) -> HashMap<CortadoAffine, String> {
     leafs
-        .filter(|node| !node.is_blank)
+        .filter(|node| match node {
+            ARTNode::Leaf { status, .. } => LeafStatus::Blank != *status,
+            _ => unreachable!(),
+        })
         .enumerate()
         .map(|(i, node)| {
             let member = group_members
                 .get_by_index(i)
                 .expect("Inconsistent group state");
-            (node.public_key, member.0.to_string())
+            (
+                match node {
+                    ARTNode::Leaf { public_key, .. } => *public_key,
+                    _ => unreachable!(),
+                },
+                member.0.to_string(),
+            )
         })
         .collect::<HashMap<CortadoAffine, String>>()
+}
+
+fn map_users_to_leaf_ids(
+    leafs: LeafIter<'_, CortadoAffine>,
+    leafs_to_users: HashMap<CortadoAffine, String>,
+) -> HashMap<String, usize> {
+    leafs
+        .filter(|node| match node {
+            ARTNode::Leaf { status, .. } => LeafStatus::Blank != *status,
+            _ => unreachable!(),
+        })
+        .enumerate()
+        .map(|(i, node)| {
+            (
+                leafs_to_users
+                    .get(match node {
+                        ARTNode::Leaf { public_key, .. } => public_key,
+                        _ => unreachable!(),
+                    })
+                    .expect("")
+                    .to_string(),
+                i,
+            )
+        })
+        .collect::<HashMap<String, usize>>()
 }

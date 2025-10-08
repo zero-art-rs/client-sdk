@@ -1,5 +1,6 @@
 use ark_ff::UniformRand;
 use sha3::Sha3_256;
+use zrt_art::types::{ARTNode, LeafStatus};
 
 use crate::{
     error::{Error, Result},
@@ -43,10 +44,23 @@ impl GroupContext {
         let removed_user = pending_state.group_info.members_mut().remove(user_id);
 
         let leaf_public_keys = pending_state
-            .iter_leaves()
+            .iter_leafs()
             .enumerate()
-            .filter(|(i, node)| !node.is_blank && *i == leaf_index)
-            .map(|(_, node)| node.public_key)
+            .filter_map(|(i, node)| match node {
+                ARTNode::Leaf {
+                    public_key, status, ..
+                } => {
+                    if let LeafStatus::Blank = status {
+                        return None;
+                    }
+                    if i == leaf_index {
+                        return Some(public_key.clone());
+                    }
+
+                    None
+                }
+                _ => None,
+            })
             .collect::<Vec<CortadoAffine>>();
 
         if leaf_public_keys.len() == 0 {

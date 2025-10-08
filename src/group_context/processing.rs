@@ -2,7 +2,10 @@ use ark_ec::{AffineRepr, CurveGroup};
 use cortado::CortadoAffine;
 use sha3::Sha3_256;
 use tracing::{instrument, trace};
-use zrt_art::traits::{ARTPrivateAPI, ARTPublicAPI};
+use zrt_art::{
+    traits::{ARTPrivateAPI, ARTPublicAPI},
+    types::{ARTNode, LeafStatus},
+};
 
 use crate::{
     error::{Error, Result},
@@ -159,7 +162,10 @@ impl GroupContext {
 
                 let verifier_artefacts = self.state.verifier_artefacts(&changes)?;
 
-                let old_leaf_public_key = self.state.art.get_node(&changes.node_index)?.public_key;
+                let old_leaf_public_key = match self.state.art.get_node(&changes.node_index)? {
+                    ARTNode::Leaf { public_key, .. } => *public_key,
+                    _ => unreachable!(),
+                };
 
                 frame.verify_art::<Sha3_256>(verifier_artefacts, old_leaf_public_key)?;
 
@@ -224,12 +230,15 @@ impl GroupContext {
 
                 frame.verify_art::<Sha3_256>(verifier_artefacts, owner_leaf_public_key)?;
 
-                let leaf_public_key = self
+                let leaf_public_key = match self
                     .state
                     .art
                     .get_node(&changes.node_index)
                     .map_err(|_| Error::InvalidInput)?
-                    .public_key;
+                {
+                    ARTNode::Leaf { public_key, .. } => *public_key,
+                    _ => unreachable!(),
+                };
 
                 if leaf_public_key
                     == (CortadoAffine::generator() * self.state.art.secret_key).into_affine()
@@ -237,11 +246,11 @@ impl GroupContext {
                     return Err(Error::UserRemovedFromGroup);
                 }
 
-                let leaves_users = self.state.map_leaves_to_users();
+                let leafs_users = self.state.map_leafs_to_users();
 
                 self.state.update_art(&changes)?;
 
-                let user_to_delete = leaves_users.get(&leaf_public_key);
+                let user_to_delete = leafs_users.get(&leaf_public_key);
                 if let Some(user_id) = user_to_delete {
                     self.state.group_info.members_mut().remove(user_id);
                 };
