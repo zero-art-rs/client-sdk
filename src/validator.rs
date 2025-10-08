@@ -1,5 +1,8 @@
 use ark_ec::{AffineRepr, CurveGroup};
+use ark_ff::UniformRand;
 use ark_serialize::CanonicalSerialize;
+use ark_std::rand::{SeedableRng, rngs::StdRng, thread_rng};
+use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use std::collections::HashMap;
 use zrt_zk::art::ARTProof;
@@ -14,11 +17,12 @@ use zrt_art::{
 use crate::{
     bounded_map::BoundedMap,
     error::{Error, Result},
-    models::frame::{Frame, GroupOperation},
+    models::{
+        frame::{Frame, GroupOperation}, group_info::{public_key_to_id, GroupInfo}, invite::{Invite, Invitee}, payload::{GroupActionPayload, Payload}, protected_payload::{ProtectedPayload, ProtectedPayloadTbs, Sender}
+    },
     proof_system::get_proof_system,
     utils::{
-        ChangesID, StageKey, compute_changes_id, decrypt, derive_leaf_key, derive_stage_key,
-        deserialize, serialize,
+        compute_changes_id, decrypt, derive_leaf_key, derive_stage_key, deserialize, encrypt, serialize, ChangesID, StageKey
     },
 };
 
@@ -382,12 +386,15 @@ impl KeyedValidator {
                     let verifier_artefacts = self
                         .upstream_art
                         .compute_artefacts_for_verification(changes)?;
-                    let public_key = if LeafStatus::Active != self
-                        .upstream_art
-                        .get_node(&changes.node_index)?
-                        .get_status().ok_or(Error::InvalidInput)?
+                    let public_key = if LeafStatus::Active
+                        != self
+                            .upstream_art
+                            .get_node(&changes.node_index)?
+                            .get_status()
+                            .ok_or(Error::InvalidInput)?
                     {
-                        (CortadoAffine::generator() * self.upstream_art.get_root_key()?.key).into_affine()
+                        (CortadoAffine::generator() * self.upstream_art.get_root_key()?.key)
+                            .into_affine()
                     } else {
                         group_owner_leaf_public_key(&self.upstream_art)
                     };
@@ -395,12 +402,15 @@ impl KeyedValidator {
                 } else {
                     let verifier_artefacts =
                         self.base_art.compute_artefacts_for_verification(changes)?;
-                    let public_key = if LeafStatus::Active != self
-                        .base_art
-                        .get_node(&changes.node_index)?
-                        .get_status().ok_or(Error::InvalidInput)?
+                    let public_key = if LeafStatus::Active
+                        != self
+                            .base_art
+                            .get_node(&changes.node_index)?
+                            .get_status()
+                            .ok_or(Error::InvalidInput)?
                     {
-                        (CortadoAffine::generator() * self.base_art.get_root_key()?.key).into_affine()
+                        (CortadoAffine::generator() * self.base_art.get_root_key()?.key)
+                            .into_affine()
                     } else {
                         group_owner_leaf_public_key(&self.base_art)
                     };
@@ -713,5 +723,140 @@ impl KeyedValidator {
 
     pub fn public_key(&self) -> CortadoAffine {
         (CortadoAffine::generator() * self.upstream_art.secret_key).into_affine()
+    }
+
+    pub fn encrypt(&self, plaintext: &[u8], associated_data: &[u8]) -> Result<Vec<u8>> {
+        encrypt(&self.upstream_stk, plaintext, associated_data)
+    }
+
+    pub fn decrypt(&self, ciphertext: &[u8], associated_data: &[u8]) -> Result<Vec<u8>> {
+        decrypt(&self.upstream_stk, ciphertext, associated_data)
+    }
+}
+
+pub struct GroupContext {
+    identity_secret_key: ScalarField,
+    validator: KeyedValidator,
+    group_info: GroupInfo,
+    members: HashMap<CortadoAffine, String>,
+    sequence_number: u64,
+    rng: StdRng
+}
+
+impl GroupContext {
+    pub fn new(identity_secret_key: ScalarField) -> Result<Self> {
+        let mut context_rng = StdRng::from_rng(thread_rng()).unwrap();
+
+        let leaf_secret = ScalarField::rand(&mut context_rng);
+        let (base_art, tree_key) =
+            PrivateART::new_art_from_secrets(&vec![leaf_secret], &CortadoAffine::generator())?;
+        let base_stk = derive_stage_key(&[0u8; 32], tree_key.key)?;
+
+        Ok(Self {
+            identity_secret_key,
+            validator: KeyedValidator::new(base_art, base_stk, 0),
+            group_info: GroupInfo::default(),
+            members: HashMap::new(),
+            sequence_number: 0,
+            rng: context_rng
+        })
+    }
+
+    pub fn process_frame(&mut self, frame: Frame) -> Result<Vec<Payload>> {
+        let (operation, stage_key) = self.validator.validate(&frame)?;
+        let protected_payload = ProtectedPayload::decode(&decrypt(
+            &stage_key,
+            frame.frame_tbs().protected_payload(),
+            &frame.frame_tbs().associated_data::<Sha3_256>()?,
+        )?)?;
+
+        // TODO: Update group info
+        Ok(protected_payload.protected_payload_tbs().payloads().to_vec())
+    }
+
+    pub fn add_member(&mut self, invitee: Invitee, mut payloads: Vec<Payload>) -> Result<(Frame, Invite)> {
+        // 1. Generate ephemeral secret key
+        let ephemeral_secret_key = ScalarField::rand(&mut self.rng);
+        // debug!("Ephemeral secret key generated");
+        // trace!("Ephemeral secret key: {:?}", ephemeral_secret_key);
+
+        // 2. Compute new member's leaf secret
+        let leaf_secret = self.compute_leaf_secret_for_invitee(invitee, ephemeral_secret_key)?;
+        let leaf_public_key = (CortadoAffine::generator() * leaf_secret).into_affine();
+        // debug!("Leaf secret computed");
+        // trace!("Leaf secret: {:?}", leaf_secret);
+
+        let (prove, changes, stage_key) = self.validator.add_member(leaf_secret)?;
+
+        payloads.push(Payload::Action(GroupActionPayload::InviteMember(
+            self.group_info.clone(),
+        )));
+
+        let protected_payload = self.create_protected_payload(payloads)?;
+
+        let frame = self
+            .create_frame_tbs(
+                &pending_state,
+                payloads,
+                Some(GroupOperation::AddMember(changes)),
+                None,
+            )?
+            .prove_art::<Sha3_256>(prover_artefacts, pending_state.art.secret_key)?;
+        debug!("Frame created");
+        trace!("Frame: {:?}", frame);
+
+        let invite =
+            self.create_invite(&pending_state, invitee, leaf_secret, ephemeral_secret_key)?;
+        debug!("Invite created");
+        trace!("Invite: {:?}", invite);
+    }
+
+    fn compute_leaf_secret_for_invitee(
+        &self,
+        invitee: Invitee,
+        ephemeral_secret_key: ScalarField,
+    ) -> Result<ScalarField> {
+        match invitee {
+            Invitee::Identified {
+                identity_public_key,
+                spk_public_key,
+            } => crate::utils::compute_leaf_secret_a(
+                self.identity_secret_key,
+                ephemeral_secret_key,
+                identity_public_key,
+                spk_public_key.unwrap_or(identity_public_key),
+            )
+            .map_err(|_| Error::InvalidInput),
+            Invitee::Unidentified(secret_key) => {
+                let public_key = (CortadoAffine::generator() * secret_key).into_affine();
+                crate::utils::compute_leaf_secret_a(
+                    self.identity_secret_key,
+                    ephemeral_secret_key,
+                    public_key,
+                    public_key,
+                )
+                .map_err(|_| Error::InvalidInput)
+            }
+        }
+    }
+
+    fn create_protected_payload(
+        &self,
+        payloads: Vec<Payload>,
+    ) -> Result<ProtectedPayload> {
+        let protected_payload_tbs = ProtectedPayloadTbs::new(
+            0,
+            Utc::now(),
+            payloads,
+            Sender::UserId(public_key_to_id(
+                self.identity_public_key(),
+            )),
+        );
+
+        Ok(protected_payload_tbs.sign::<Sha3_256>(self.identity_secret_key)?)
+    }
+
+    pub fn identity_public_key(&self) -> CortadoAffine {
+        (CortadoAffine::generator() * self.identity_secret_key).into_affine()
     }
 }
