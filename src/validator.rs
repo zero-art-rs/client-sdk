@@ -3,7 +3,7 @@ use ark_ff::UniformRand;
 use ark_std::rand::thread_rng;
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Mutex};
 use zrt_zk::art::ARTProof;
 
 use serde::{Deserialize, Serialize};
@@ -18,15 +18,14 @@ use crate::{
     error::{Error, Result},
     models::{
         frame::{Frame, FrameTbs, GroupOperation, Proof},
-        group_info::{GroupInfo, Role, User, public_key_to_id},
+        group_info::{public_key_to_id, GroupInfo, Role, User},
         invite::{Invite, InviteTbs, Invitee, ProtectedInviteData},
         payload::{GroupActionPayload, Payload},
         protected_payload::{ProtectedPayload, ProtectedPayloadTbs, Sender},
     },
     proof_system::get_proof_system,
     utils::{
-        ChangesID, StageKey, compute_changes_id, decrypt, derive_invite_key, derive_leaf_key,
-        derive_stage_key, deserialize, encrypt, serialize,
+        compute_changes_id, decrypt, derive_invite_key, derive_leaf_key, derive_stage_key, deserialize, encrypt, serialize, ChangesID, StageKey
     },
 };
 
@@ -776,10 +775,10 @@ impl Nonce {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct GroupContext {
     identity_secret_key: ScalarField,
-    validator: KeyedValidator,
+    validator: Mutex<KeyedValidator>,
     group_info: GroupInfo,
     seq_num: u64,
     nonce: Nonce,
@@ -794,7 +793,7 @@ impl GroupContext {
 
         Ok(Self {
             identity_secret_key,
-            validator: KeyedValidator::new(base_art, base_stk, 0),
+            validator: Mutex::new(KeyedValidator::new(base_art, base_stk, 0)),
             group_info: GroupInfo::default(),
             seq_num: 0,
             nonce: Nonce(0),
@@ -804,7 +803,7 @@ impl GroupContext {
     pub fn into_parts(self) -> (ScalarField, KeyedValidator, GroupInfo, u64, Nonce) {
         (
             self.identity_secret_key,
-            self.validator,
+            self.validator.into_inner().unwrap(),
             self.group_info,
             self.seq_num,
             self.nonce,
@@ -814,7 +813,7 @@ impl GroupContext {
     pub fn to_parts(&self) -> (ScalarField, KeyedValidator, GroupInfo, u64, Nonce) {
         (
             self.identity_secret_key,
-            self.validator.clone(),
+            self.validator.lock().unwrap().clone(),
             self.group_info.clone(),
             self.seq_num,
             self.nonce,
@@ -830,7 +829,7 @@ impl GroupContext {
     ) -> Self {
         Self {
             identity_secret_key,
-            validator,
+            validator: Mutex::new(validator),
             group_info,
             seq_num,
             nonce,
@@ -838,7 +837,8 @@ impl GroupContext {
     }
 
     pub fn process_frame(&mut self, frame: Frame) -> Result<Vec<Payload>> {
-        let (operation, decrypt) = self.validator.validate(&frame)?;
+        let mut validator = self.validator.lock().unwrap();
+        let (operation, decrypt) = validator.validate(&frame)?;
 
         let protected_payload = ProtectedPayload::decode(&decrypt(
             frame.frame_tbs().protected_payload(),
@@ -959,8 +959,9 @@ impl GroupContext {
         invitee: Invitee,
         mut payloads: Vec<Payload>,
     ) -> Result<(Frame, Invite)> {
+        let validator = self.validator.lock().unwrap();
         // Future epoch
-        let epoch = self.validator.epoch() + 1;
+        let epoch = validator.epoch() + 1;
 
         // 1. Generate ephemeral secret key
         let ephemeral_secret_key = ScalarField::rand(&mut thread_rng());
@@ -970,7 +971,7 @@ impl GroupContext {
         let leaf_secret = self.compute_leaf_secret_for_invitee(invitee, ephemeral_secret_key)?;
 
         // Predict add member changes
-        let (changes, stage_key, prove) = self.validator.add_member(leaf_secret)?;
+        let (changes, stage_key, prove) = validator.add_member(leaf_secret)?;
 
         payloads.push(Payload::Action(GroupActionPayload::InviteMember(
             self.group_info.clone(),
@@ -1028,8 +1029,10 @@ impl GroupContext {
     }
 
     pub fn remove_member(&mut self, user_id: &str, mut payloads: Vec<Payload>) -> Result<Frame> {
+        let validator = self.validator.lock().unwrap();
+
         // Future epoch
-        let epoch = self.validator.epoch() + 1;
+        let epoch = validator.epoch() + 1;
 
         let vanishing_leaf_secret: ark_ff::Fp<ark_ff::MontBackend<cortado::FrConfig, 4>, 4> =
             ScalarField::rand(&mut thread_rng());
@@ -1042,7 +1045,7 @@ impl GroupContext {
 
         // Predict add member changes
         let (changes, stage_key, prove) =
-            self.validator.remove_member(leaf, vanishing_leaf_secret)?;
+            validator.remove_member(leaf, vanishing_leaf_secret)?;
 
         payloads.push(Payload::Action(GroupActionPayload::RemoveMember(
             self.group_info
@@ -1085,8 +1088,10 @@ impl GroupContext {
     }
 
     pub fn create_frame(&mut self, payloads: Vec<Payload>) -> Result<Frame> {
+        let mut validator = self.validator.lock().unwrap();
+
         // Future epoch
-        let epoch = self.validator.epoch() + 1;
+        let epoch = validator.epoch() + 1;
 
         let protected_payload_tbs = ProtectedPayloadTbs::new(
             self.seq_num,
@@ -1098,19 +1103,19 @@ impl GroupContext {
         let protected_payload = protected_payload_tbs.sign::<Sha3_256>(self.identity_secret_key)?;
 
         // Predict add member changes
-        let frame = if self.validator.is_participant() {
+        let frame = if validator.is_participant() {
             let mut frame_tbs =
                 FrameTbs::new(self.group_info.id(), epoch, self.nonce.next(), None, vec![]);
 
-            let encrypted_protected_payload = self.validator.encrypt(
+            let encrypted_protected_payload = validator.encrypt(
                 &protected_payload.encode_to_vec(),
                 &frame_tbs.associated_data::<Sha3_256>()?,
             )?;
             frame_tbs.set_protected_payload(encrypted_protected_payload);
 
-            frame_tbs.prove_schnorr::<Sha3_256>(self.validator.upstream_art.get_root_key()?.key)?
+            frame_tbs.prove_schnorr::<Sha3_256>(validator.upstream_art.get_root_key()?.key)?
         } else {
-            let (changes, stage_key, prove) = self.validator.update_key()?;
+            let (changes, stage_key, prove) = validator.update_key()?;
 
             let mut frame_tbs = FrameTbs::new(
                 self.group_info.id(),
@@ -1135,22 +1140,24 @@ impl GroupContext {
     }
 
     pub fn join_group_as(&mut self, user: User) -> Result<Frame> {
+        let mut validator = self.validator.lock().unwrap();
+
         // Future epoch
-        let epoch = self.validator.epoch() + 1;
+        let epoch = validator.epoch() + 1;
 
         let protected_payload_tbs = ProtectedPayloadTbs::new(
             self.seq_num,
             Utc::now(),
             vec![Payload::Action(GroupActionPayload::JoinGroup(user))],
             Sender::LeafId(public_key_to_id(
-                (CortadoAffine::generator() * self.validator.upstream_art.secret_key).into_affine(),
+                (CortadoAffine::generator() * validator.upstream_art.secret_key).into_affine(),
             )),
         );
 
         let protected_payload =
-            protected_payload_tbs.sign::<Sha3_256>(self.validator.upstream_art.secret_key)?;
+            protected_payload_tbs.sign::<Sha3_256>(validator.upstream_art.secret_key)?;
 
-        let (changes, stage_key, prove) = self.validator.update_key()?;
+        let (changes, stage_key, prove) = validator.update_key()?;
 
         let mut frame_tbs = FrameTbs::new(
             self.group_info.id(),
