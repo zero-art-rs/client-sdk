@@ -1214,6 +1214,10 @@ impl GroupContext {
     pub fn group_info(&self) -> &GroupInfo {
         &self.group_info
     }
+
+    pub fn epoch(&self) -> u64 {
+        self.validator.lock().unwrap().epoch()
+    }
 }
 
 #[cfg(test)]
