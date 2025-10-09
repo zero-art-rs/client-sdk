@@ -3,6 +3,7 @@ use ark_ff::UniformRand;
 use ark_std::rand::thread_rng;
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
+use zrt_crypto::schnorr;
 use std::{collections::HashMap, sync::Mutex};
 use zrt_zk::art::ARTProof;
 
@@ -1206,17 +1207,23 @@ impl GroupContext {
             }
         }
     }
+    
+    pub fn group_info(&self) -> &GroupInfo {
+        &self.group_info
+    }
+    
+    pub fn epoch(&self) -> u64 {
+        self.validator.lock().unwrap().epoch()
+    }
 
     pub fn identity_public_key(&self) -> CortadoAffine {
         (CortadoAffine::generator() * self.identity_secret_key).into_affine()
     }
 
-    pub fn group_info(&self) -> &GroupInfo {
-        &self.group_info
-    }
-
-    pub fn epoch(&self) -> u64 {
-        self.validator.lock().unwrap().epoch()
+    pub fn sign_with_tk(&self, msg: &[u8]) -> Result<Vec<u8>> {
+        let tk = self.validator.lock().unwrap().upstream_art.get_root_key()?;
+        let tk_public_key = (CortadoAffine::generator() * tk.key).into_affine();
+        Ok(schnorr::sign(&vec![tk.key], &vec![tk_public_key], msg)?)
     }
 }
 
