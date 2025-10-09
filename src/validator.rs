@@ -790,16 +790,18 @@ pub struct GroupContext {
 }
 
 impl GroupContext {
-    pub fn new(identity_secret_key: ScalarField) -> Result<Self> {
+    pub fn new(identity_secret_key: ScalarField, user: User, mut group_info: GroupInfo) -> Result<Self> {
         let leaf_secret = ScalarField::rand(&mut thread_rng());
         let (base_art, tree_key) =
             PrivateART::new_art_from_secrets(&vec![leaf_secret], &CortadoAffine::generator())?;
         let base_stk = derive_stage_key(&[0u8; 32], tree_key.key)?;
 
+        group_info.members_mut().insert((CortadoAffine::generator() * leaf_secret).into(), user);
+
         Ok(Self {
             identity_secret_key,
             validator: Mutex::new(KeyedValidator::new(base_art, base_stk, 0)),
-            group_info: GroupInfo::default(),
+            group_info: group_info,
             seq_num: 0,
             nonce: Nonce(0),
         })
