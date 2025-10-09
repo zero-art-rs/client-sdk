@@ -3,8 +3,8 @@ use ark_ff::UniformRand;
 use ark_std::rand::thread_rng;
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
-use zrt_crypto::schnorr;
 use std::{collections::HashMap, sync::Mutex};
+use zrt_crypto::schnorr;
 use zrt_zk::art::ARTProof;
 
 use serde::{Deserialize, Serialize};
@@ -19,14 +19,15 @@ use crate::{
     error::{Error, Result},
     models::{
         frame::{Frame, FrameTbs, GroupOperation, Proof},
-        group_info::{public_key_to_id, GroupInfo, Role, User},
+        group_info::{GroupInfo, Role, User, public_key_to_id},
         invite::{Invite, InviteTbs, Invitee, ProtectedInviteData},
         payload::{GroupActionPayload, Payload},
         protected_payload::{ProtectedPayload, ProtectedPayloadTbs, Sender},
     },
     proof_system::get_proof_system,
     utils::{
-        compute_changes_id, decrypt, derive_invite_key, derive_leaf_key, derive_stage_key, deserialize, encrypt, serialize, ChangesID, StageKey
+        ChangesID, StageKey, compute_changes_id, decrypt, derive_invite_key, derive_leaf_key,
+        derive_stage_key, deserialize, encrypt, serialize,
     },
 };
 
@@ -790,21 +791,39 @@ pub struct GroupContext {
 }
 
 impl GroupContext {
-    pub fn new(identity_secret_key: ScalarField, user: User, mut group_info: GroupInfo) -> Result<Self> {
+    pub fn new(
+        identity_secret_key: ScalarField,
+        user: User,
+        mut group_info: GroupInfo,
+    ) -> Result<(Self, Frame)> {
         let leaf_secret = ScalarField::rand(&mut thread_rng());
         let (base_art, tree_key) =
             PrivateART::new_art_from_secrets(&vec![leaf_secret], &CortadoAffine::generator())?;
         let base_stk = derive_stage_key(&[0u8; 32], tree_key.key)?;
 
-        group_info.members_mut().insert((CortadoAffine::generator() * leaf_secret).into(), user);
+        group_info
+            .members_mut()
+            .insert((CortadoAffine::generator() * leaf_secret).into(), user);
 
-        Ok(Self {
-            identity_secret_key,
-            validator: Mutex::new(KeyedValidator::new(base_art, base_stk, 0)),
-            group_info: group_info,
-            seq_num: 0,
-            nonce: Nonce(0),
-        })
+        let frame = FrameTbs::new(
+            group_info.id(),
+            0,
+            serialize((CortadoAffine::generator() * identity_secret_key).into_affine())?,
+            Some(GroupOperation::Init(base_art.clone().into())),
+            vec![],
+        )
+        .prove_schnorr::<Sha3_256>(identity_secret_key)?;
+
+        Ok((
+            Self {
+                identity_secret_key,
+                validator: Mutex::new(KeyedValidator::new(base_art, base_stk, 0)),
+                group_info: group_info,
+                seq_num: 0,
+                nonce: Nonce(0),
+            },
+            frame,
+        ))
     }
 
     pub fn into_parts(self) -> (ScalarField, KeyedValidator, GroupInfo, u64, Nonce) {
@@ -1051,8 +1070,7 @@ impl GroupContext {
             .ok_or(Error::SenderNotInGroup)?;
 
         // Predict add member changes
-        let (changes, stage_key, prove) =
-            validator.remove_member(leaf, vanishing_leaf_secret)?;
+        let (changes, stage_key, prove) = validator.remove_member(leaf, vanishing_leaf_secret)?;
 
         payloads.push(Payload::Action(GroupActionPayload::RemoveMember(
             self.group_info
@@ -1213,11 +1231,11 @@ impl GroupContext {
             }
         }
     }
-    
+
     pub fn group_info(&self) -> &GroupInfo {
         &self.group_info
     }
-    
+
     pub fn epoch(&self) -> u64 {
         self.validator.lock().unwrap().epoch()
     }
