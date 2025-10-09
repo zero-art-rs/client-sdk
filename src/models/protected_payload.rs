@@ -130,7 +130,7 @@ impl ProtectedPayloadTbs {
         )?;
         Ok(ProtectedPayload {
             protected_payload_tbs: self,
-            signature: signature,
+            signature,
         })
     }
 

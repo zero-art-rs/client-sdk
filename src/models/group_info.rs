@@ -5,7 +5,6 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use cortado::CortadoAffine;
-use indexmap::IndexMap;
 use prost::Message;
 use sha3::Digest;
 use std::collections::HashMap;
@@ -23,19 +22,13 @@ pub struct GroupInfo {
 }
 
 impl GroupInfo {
-    pub fn new(
-        id: Uuid,
-        name: String,
-        created: DateTime<Utc>,
-        metadata: Vec<u8>,
-        members: GroupMembers,
-    ) -> Self {
+    pub fn new(id: Uuid, name: String, created: DateTime<Utc>, metadata: Vec<u8>) -> Self {
         Self {
             id,
             name,
             created,
             metadata,
-            members,
+            members: GroupMembers::default(),
         }
     }
 
@@ -110,71 +103,78 @@ impl From<GroupInfo> for zero_art_proto::GroupInfo {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct GroupMembers(IndexMap<String, User>);
+pub struct GroupMembers {
+    members: HashMap<String, User>,
+    leaf_members: bimap::BiMap<CortadoAffine, String>,
+}
 
 impl GroupMembers {
-    pub fn insert(&mut self, id: String, user: User) {
-        self.0.insert(id, user);
+    pub fn insert(&mut self, leaf: CortadoAffine, user: User) {
+        let id = user.id().to_string();
+        self.members.insert(id.clone(), user);
+        self.leaf_members.insert(leaf, id);
     }
 
     pub fn remove(&mut self, id: &str) -> Option<User> {
-        self.0.shift_remove(id)
+        let user = self.members.remove(id);
+        self.leaf_members.remove_by_right(id);
+        user
+    }
+
+    pub fn remove_by_leaf(&mut self, leaf: &CortadoAffine) -> Option<User> {
+        let id = self.leaf_members.remove_by_left(leaf)?.1;
+        self.members.remove(&id)
     }
 
     /// Find index of `id` and then replace this key-value with (user.id, user)
-    pub fn replace(&mut self, id: &str, user: User) -> Option<User> {
-        if let Some(index) = self.0.get_index_of(id) {
-            let (_, replaced_user) = self.0.swap_remove_index(index)?;
+    pub fn update_user(&mut self, leaf: CortadoAffine, user: User) -> Option<User> {
+        let id = self.leaf_members.get_by_left(&leaf)?;
+        let replaced_user = self.members.remove(id)?;
 
-            let (insert_index, _) = self.0.insert_full(user.id().to_string(), user);
+        self.leaf_members.insert(leaf, user.id.to_string());
+        self.members.insert(user.id().to_string(), user);
 
-            if insert_index != index {
-                self.0.swap_indices(insert_index, index);
-            }
-
-            Some(replaced_user)
-        } else {
-            None
-        }
-        // self.0.insert(id, user);
-        // Some(self.0.swap_remove_index(index)?.1)
+        Some(replaced_user)
     }
 
-    pub fn reorder(&mut self, keys_indexes: HashMap<String, usize>) {
-        self.0
-            .sort_by_key(|k, _| *keys_indexes.get(k).unwrap_or(&usize::MAX));
+    pub fn update_leaf(&mut self, old_leaf: CortadoAffine, new_leaf: CortadoAffine) -> Option<()> {
+        let user_id = self.leaf_members.get_by_left(&old_leaf)?.to_owned();
+        let _ = self.leaf_members.remove_by_left(&old_leaf)?;
+        self.leaf_members.insert(new_leaf, user_id);
+
+        None
     }
 
     pub fn get(&self, id: &str) -> Option<&User> {
-        self.0.get(id)
+        self.members.get(id)
     }
 
-    pub fn get_by_index(&self, index: usize) -> Option<(&String, &User)> {
-        self.0.get_index(index)
+    pub fn get_leaf(&self, id: &str) -> Option<&CortadoAffine> {
+        self.leaf_members.get_by_right(id)
     }
 
-    pub fn get_index_by_id(&self, id: &str) -> Option<usize> {
-        self.0.get_index_of(id)
-    }
-
-    pub fn get_by_public_key(&self, public_key: &CortadoAffine) -> Option<&User> {
-        self.0.get(&public_key_to_id(*public_key))
+    pub fn get_id(&self, leaf: &CortadoAffine) -> Option<&String> {
+        self.leaf_members.get_by_left(leaf)
     }
 
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.members.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.members.is_empty()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &User> {
-        self.0.values()
+        self.members.values()
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut User> {
-        self.0.values_mut()
+        self.members.values_mut()
     }
 
     pub fn iter_with_ids(&self) -> impl Iterator<Item = (&String, &User)> {
-        self.0.iter()
+        self.members.iter()
     }
 }
 
@@ -185,7 +185,10 @@ impl TryFrom<Vec<zero_art_proto::User>> for GroupMembers {
 
         for proto_user in value {
             let user: User = proto_user.try_into()?;
-            members.insert(user.id().to_string(), user);
+
+            let leaf: CortadoAffine = deserialize(&user.metadata)?;
+
+            members.insert(leaf, user);
         }
 
         Ok(members)
@@ -194,17 +197,14 @@ impl TryFrom<Vec<zero_art_proto::User>> for GroupMembers {
 
 impl From<GroupMembers> for Vec<zero_art_proto::User> {
     fn from(value: GroupMembers) -> Self {
-        value.0.into_values().map(|user| user.into()).collect()
-    }
-}
-
-impl From<Vec<User>> for GroupMembers {
-    fn from(users: Vec<User>) -> Self {
-        let mut gm = GroupMembers::default();
-        for user in users.into_iter() {
-            gm.insert(user.id().to_string(), user);
-        }
-        gm
+        value
+            .members
+            .into_iter()
+            .map(|(id, mut user)| {
+                user.metadata = serialize(value.leaf_members.get_by_right(&id).unwrap()).unwrap();
+                user.into()
+            })
+            .collect()
     }
 }
 
@@ -214,16 +214,11 @@ pub struct User {
     name: String,
     public_key: CortadoAffine,
     metadata: Vec<u8>,
-    role: zero_art_proto::Role,
+    role: Role,
 }
 
 impl User {
-    pub fn new(
-        name: String,
-        public_key: CortadoAffine,
-        metadata: Vec<u8>,
-        role: zero_art_proto::Role,
-    ) -> Self {
+    pub fn new(name: String, public_key: CortadoAffine, metadata: Vec<u8>, role: Role) -> Self {
         Self {
             id: public_key_to_id(public_key),
             name,
@@ -238,7 +233,7 @@ impl User {
         name: String,
         public_key: CortadoAffine,
         metadata: Vec<u8>,
-        role: zero_art_proto::Role,
+        role: Role,
     ) -> Self {
         Self {
             id,
@@ -274,11 +269,11 @@ impl User {
         &self.metadata
     }
 
-    pub fn role(&self) -> zero_art_proto::Role {
+    pub fn role(&self) -> Role {
         self.role
     }
 
-    pub fn role_mut(&mut self) -> &mut zero_art_proto::Role {
+    pub fn role_mut(&mut self) -> &mut Role {
         &mut self.role
     }
 
@@ -308,7 +303,7 @@ impl TryFrom<zero_art_proto::User> for User {
             name: value.name,
             public_key,
             metadata: value.picture,
-            role,
+            role: role.into(),
         })
     }
 }
@@ -325,6 +320,37 @@ impl From<User> for zero_art_proto::User {
     }
 }
 
+#[derive(Debug, Clone, Default, Copy)]
+pub enum Role {
+    Read,
+    #[default]
+    Write,
+    Ownership,
+    Admin,
+}
+
+impl From<zero_art_proto::Role> for Role {
+    fn from(value: zero_art_proto::Role) -> Self {
+        match value {
+            zero_art_proto::Role::Read => Self::Read,
+            zero_art_proto::Role::Write => Self::Write,
+            zero_art_proto::Role::Ownership => Self::Ownership,
+            zero_art_proto::Role::Admin => Self::Admin,
+        }
+    }
+}
+
+impl From<Role> for zero_art_proto::Role {
+    fn from(value: Role) -> Self {
+        match value {
+            Role::Read => zero_art_proto::Role::Read,
+            Role::Write => zero_art_proto::Role::Write,
+            Role::Ownership => zero_art_proto::Role::Ownership,
+            Role::Admin => zero_art_proto::Role::Admin,
+        }
+    }
+}
+
 pub fn public_key_to_id(public_key: CortadoAffine) -> String {
     if public_key == CortadoAffine::default() {
         hex::encode(rand::random::<[u8; USER_ID_LENGTH / 2]>())
@@ -332,7 +358,7 @@ pub fn public_key_to_id(public_key: CortadoAffine) -> String {
         // TODO: Remove expect
         hex::encode(
             &sha3::Sha3_256::digest(
-                &crate::utils::serialize(public_key).expect("failed to serialize public key"),
+                crate::utils::serialize(public_key).expect("failed to serialize public key"),
             )[..USER_ID_LENGTH / 2],
         )
     }

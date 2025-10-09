@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use ark_ec::{AffineRepr, CurveGroup};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use prost::Message;
-use sha3::{Digest, Sha3_256};
+use sha3::Digest;
 use zrt_art::types::{BranchChanges, NodeIndex, ProverArtefacts, PublicART, VerifierArtefacts};
 use zrt_crypto::schnorr;
 
@@ -60,7 +60,7 @@ impl Frame {
             Proof::SchnorrSignature(_) => return Err(Error::InvalidVerificationMethod),
             Proof::ArtProof(proof) => get_proof_system().verify(
                 verifier_artefacts,
-                &vec![public_key],
+                &[public_key],
                 &D::digest(self.frame_tbs.encode_to_vec()?),
                 proof.clone(),
             )?,
@@ -199,7 +199,7 @@ impl FrameTbs {
     pub fn associated_data<D: Digest>(&self) -> Result<Vec<u8>> {
         let mut inner: zero_art_proto::FrameTbs = self.clone().try_into()?;
         std::mem::take(&mut inner.protected_payload);
-        Ok(Sha3_256::digest(inner.encode_to_vec()).to_vec())
+        Ok(D::digest(inner.encode_to_vec()).to_vec())
     }
 
     pub fn prove_schnorr<D: Digest>(self, secret_key: ScalarField) -> Result<Frame> {
@@ -222,7 +222,7 @@ impl FrameTbs {
     ) -> Result<Frame> {
         let proof = get_proof_system().prove(
             prover_artefacts,
-            &vec![secret_key],
+            &[secret_key],
             &D::digest(self.encode_to_vec()?),
         )?;
         Ok(Frame {

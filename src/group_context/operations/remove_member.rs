@@ -1,6 +1,5 @@
 use ark_ff::UniformRand;
 use sha3::Sha3_256;
-use zrt_art::types::{ARTNode, LeafStatus};
 
 use crate::{
     error::{Error, Result},
@@ -11,7 +10,7 @@ use crate::{
         payload::{GroupActionPayload, Payload},
     },
 };
-use cortado::{CortadoAffine, Fr as ScalarField};
+use cortado::Fr as ScalarField;
 use tracing::{info, instrument};
 
 impl GroupContext {
@@ -35,43 +34,18 @@ impl GroupContext {
         let temporary_leaf_secret: ark_ff::Fp<ark_ff::MontBackend<cortado::FrConfig, 4>, 4> =
             ScalarField::rand(&mut self.rng);
 
-        let leaf_index = pending_state
+        let member_leaf = pending_state
             .group_info
             .members()
-            .get_index_by_id(user_id)
-            .ok_or(Error::InvalidInput)?;
+            .get_leaf(user_id)
+            .ok_or(Error::InvalidInput)?
+            .to_owned();
 
         let removed_user = pending_state.group_info.members_mut().remove(user_id);
 
-        let leaf_public_keys = pending_state
-            .iter_leafs()
-            .enumerate()
-            .filter_map(|(i, node)| match node {
-                ARTNode::Leaf {
-                    public_key, status, ..
-                } => {
-                    if let LeafStatus::Blank = status {
-                        return None;
-                    }
-                    if i == leaf_index {
-                        return Some(public_key.clone());
-                    }
-
-                    None
-                }
-                _ => None,
-            })
-            .collect::<Vec<CortadoAffine>>();
-
-        if leaf_public_keys.len() == 0 {
-            return Err(Error::InvalidInput);
-        }
-
-        let leaf_public_key = leaf_public_keys[0];
-
         // 2. Make node blank in ART and recompute STK
         let (changes, prover_artefacts) =
-            pending_state.make_blank(&leaf_public_key, &temporary_leaf_secret)?;
+            pending_state.make_blank(&member_leaf, &temporary_leaf_secret)?;
 
         payloads.push(Payload::Action(GroupActionPayload::RemoveMember(
             removed_user.clone().unwrap_or_default(),

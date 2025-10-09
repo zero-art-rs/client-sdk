@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_std::UniformRand;
 use ark_std::rand::SeedableRng;
@@ -7,7 +5,7 @@ use ark_std::rand::prelude::StdRng;
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use tracing::{instrument, trace};
-use zrt_art::types::{ARTNode, LeafIter, LeafStatus, PublicART};
+use zrt_art::types::PublicART;
 use zrt_art::{traits::ARTPrivateAPI, types::PrivateART};
 use zrt_crypto::schnorr;
 
@@ -15,11 +13,11 @@ use sha3::Sha3_256;
 
 use crate::error::{Error, Result};
 use crate::group_state::GroupState;
+use crate::models;
 use crate::models::frame::{Frame, GroupOperation};
-use crate::models::group_info::{GroupInfo, User, public_key_to_id};
+use crate::models::group_info::{GroupInfo, Role, User, public_key_to_id};
 use crate::models::payload::Payload;
 use crate::utils::{derive_stage_key, encrypt, hkdf, serialize};
-use crate::{models, zero_art_proto};
 use ark_std::rand::thread_rng;
 
 pub mod operations;
@@ -52,12 +50,21 @@ pub struct GroupContext {
 }
 
 impl GroupContext {
-    pub fn new(identity_secret_key: ScalarField, group_info: GroupInfo) -> Result<(Self, Frame)> {
+    pub fn new(
+        identity_secret_key: ScalarField,
+        owner: User,
+        mut group_info: GroupInfo,
+    ) -> Result<(Self, Frame)> {
         let mut context_rng = StdRng::from_rng(thread_rng()).unwrap();
 
         let leaf_secret = ScalarField::rand(&mut context_rng);
         let (art, tk) =
             PrivateART::new_art_from_secrets(&vec![leaf_secret], &CortadoAffine::generator())?;
+
+        group_info.members_mut().insert(
+            (CortadoAffine::generator() * leaf_secret).into_affine(),
+            owner,
+        );
 
         let state = GroupState::from_parts(
             leaf_secret,
@@ -85,7 +92,7 @@ impl GroupContext {
             )?
             .prove_schnorr::<Sha3_256>(identity_secret_key)?;
 
-        return Ok((group_context, frame));
+        Ok((group_context, frame))
     }
 
     pub fn new_with_rng(
@@ -298,31 +305,6 @@ impl GroupContext {
     }
 }
 
-fn map_users_to_leaf_ids(
-    leafs: LeafIter<'_, CortadoAffine>,
-    leafs_to_users: HashMap<CortadoAffine, String>,
-) -> HashMap<String, usize> {
-    leafs
-        .filter(|node| match node {
-            ARTNode::Leaf { status, .. } => LeafStatus::Blank != *status,
-            _ => unreachable!(),
-        })
-        .enumerate()
-        .map(|(i, node)| {
-            (
-                leafs_to_users
-                    .get(match node {
-                        ARTNode::Leaf { public_key, .. } => public_key,
-                        _ => unreachable!(),
-                    })
-                    .expect("")
-                    .to_string(),
-                i,
-            )
-        })
-        .collect::<HashMap<String, usize>>()
-}
-
 pub struct PendingGroupContext(GroupContext);
 
 impl PendingGroupContext {
@@ -333,7 +315,7 @@ impl PendingGroupContext {
     pub fn join_group_as(&mut self, mut user: User) -> Result<Frame> {
         let leaf_secret = ScalarField::rand(&mut thread_rng());
 
-        *user.role_mut() = zero_art_proto::Role::Write;
+        *user.role_mut() = Role::Write;
 
         let group_action_payload = models::payload::Payload::Action(
             models::payload::GroupActionPayload::JoinGroup(user.clone()),
@@ -347,7 +329,7 @@ impl PendingGroupContext {
             .pending_state
             .group_info
             .members_mut()
-            .replace(&public_key_to_id(temporary_leaf_public_key), user);
+            .update_user(temporary_leaf_public_key, user);
 
         Ok(frame)
     }

@@ -6,8 +6,6 @@ use ark_ff::PrimeField;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use hkdf::Hkdf;
-use indexmap::IndexMap;
-use serde::Serialize;
 use sha3::{Digest, Sha3_256};
 use zrt_art::types::BranchChanges;
 use zrt_crypto::x3dh::{x3dh_a, x3dh_b};
@@ -23,7 +21,7 @@ pub fn encrypt(stage_key: &[u8; 32], plaintext: &[u8], aad: &[u8]) -> Result<Vec
 
     let (key, nonce) = (&okm[..32], &okm[32..]);
     let key = Key::<Aes256Gcm>::from_slice(key);
-    let nonce = Nonce::<Aes256Gcm>::from_slice(&nonce);
+    let nonce = Nonce::<Aes256Gcm>::from_slice(nonce);
 
     let cipher = Aes256Gcm::new(key);
 
@@ -47,7 +45,7 @@ pub fn decrypt(stage_key: &[u8; 32], ciphertext: &[u8], aad: &[u8]) -> Result<Ve
 
     let (key, nonce) = (&okm[..32], &okm[32..]);
     let key = Key::<Aes256Gcm>::from_slice(key);
-    let nonce = Nonce::<Aes256Gcm>::from_slice(&nonce);
+    let nonce = Nonce::<Aes256Gcm>::from_slice(nonce);
 
     let cipher = Aes256Gcm::new(key);
 
@@ -95,13 +93,13 @@ pub fn deserialize<T: CanonicalDeserialize>(value_bytes: &[u8]) -> Result<T> {
 }
 
 pub fn hkdf(salt: Option<&[u8]>, ikm: &[u8]) -> Result<[u8; 32]> {
-    let h = Hkdf::<Sha3_256>::new(salt, &ikm);
+    let h = Hkdf::<Sha3_256>::new(salt, ikm);
     let mut okm = [0u8; 32];
     h.expand(&[], &mut okm)?;
     Ok(okm)
 }
 
-pub fn derive_stage_key(stage_key: &[u8; 32], tree_key: ScalarField) -> Result<[u8; 32]> {
+pub fn derive_stage_key(stage_key: &StageKey, tree_key: ScalarField) -> Result<StageKey> {
     // Derive stage key: stk(i+1) = HKDF( "stage-key-derivation", stk(i) || tk(i+1) )
     let stk = hkdf(
         Some(b"stage-key-derivation"),
@@ -110,12 +108,16 @@ pub fn derive_stage_key(stage_key: &[u8; 32], tree_key: ScalarField) -> Result<[
     Ok(stk)
 }
 
-pub fn derive_leaf_key(stage_key: &[u8; 32], leaf_key: ScalarField) -> Result<ScalarField> {
+pub fn derive_leaf_key(stage_key: &StageKey, leaf_key: ScalarField) -> Result<ScalarField> {
     // Derive leaf secret: leaf_key(i+1) = HKDF( "leaf-key-derivation", stk(i) || leaf_key(i) )
     Ok(ScalarField::from_le_bytes_mod_order(&hkdf(
         Some(b"leaf-key-derivation"),
         &vec![&stage_key[..], &serialize(leaf_key)?].concat(),
     )?))
+}
+
+pub fn derive_invite_key(leaf_key: ScalarField) -> Result<StageKey> {
+    hkdf(Some(b"invite-key-derivation"), &serialize(leaf_key)?)
 }
 
 pub type ChangesID = [u8; 8];
@@ -125,23 +127,3 @@ pub fn compute_changes_id(changes: &BranchChanges<CortadoAffine>) -> Result<Chan
 }
 
 pub type StageKey = [u8; 32];
-
-// /// Adapter for serialization of arkworks-compatible types using CanonicalSerialize
-// pub fn ark_se<S, A: CanonicalSerialize>(a: &A, s: S) -> Result<S::Ok, S::Error>
-// where
-//     S: serde::Serializer,
-// {
-//     let mut bytes = vec![];
-//     a.serialize_with_mode(&mut bytes, Compress::Yes)
-//         .map_err(serde::ser::Error::custom)?;
-//     s.serialize_bytes(&bytes)
-// }
-// /// Adapter for deserialization of arkworks-compatible types using CanonicalDeserialize
-// pub fn ark_de<'de, D, A: CanonicalDeserialize>(data: D) -> Result<A, D::Error>
-// where
-//     D: serde::de::Deserializer<'de>,
-// {
-//     let s: ByteBuf = serde::de::Deserialize::deserialize(data)?;
-//     let a = A::deserialize_with_mode(s.as_slice(), Compress::Yes, Validate::Yes);
-//     a.map_err(serde::de::Error::custom)
-// }

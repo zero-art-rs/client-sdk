@@ -19,7 +19,7 @@ impl Payload {
     }
 
     pub fn decode(data: &[u8]) -> Result<Self> {
-        Ok(zero_art_proto::Payload::decode(data)?.try_into()?)
+        zero_art_proto::Payload::decode(data)?.try_into()
     }
 }
 

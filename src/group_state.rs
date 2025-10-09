@@ -1,18 +1,13 @@
-use std::collections::HashMap;
-
 use ark_ec::AffineRepr;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use zrt_art::{
     traits::{ARTPrivateAPI, ARTPublicAPI, ARTPublicView},
-    types::{
-        ARTNode, BranchChanges, LeafIter, LeafStatus, PrivateART, ProverArtefacts, PublicART,
-        VerifierArtefacts,
-    },
+    types::{BranchChanges, LeafIter, PrivateART, ProverArtefacts, PublicART, VerifierArtefacts},
 };
 
 use crate::{
     error::{Error, Result},
-    models::group_info::{GroupInfo, GroupMembers},
+    models::group_info::GroupInfo,
     utils::{decrypt, encrypt},
 };
 
@@ -164,58 +159,4 @@ impl GroupState {
     pub fn iter_leafs(&self) -> LeafIter<'_, CortadoAffine> {
         LeafIter::new(self.art.get_root())
     }
-
-    pub fn map_leafs_to_users(&self) -> HashMap<CortadoAffine, String> {
-        map_leafs_to_users(self.iter_leafs(), self.group_info.members())
-    }
-}
-
-fn map_leafs_to_users(
-    leafs: LeafIter<'_, CortadoAffine>,
-    group_members: &GroupMembers,
-) -> HashMap<CortadoAffine, String> {
-    leafs
-        .filter(|node| match node {
-            ARTNode::Leaf { status, .. } => LeafStatus::Blank != *status,
-            _ => unreachable!(),
-        })
-        .enumerate()
-        .map(|(i, node)| {
-            let member = group_members
-                .get_by_index(i)
-                .expect("Inconsistent group state");
-            (
-                match node {
-                    ARTNode::Leaf { public_key, .. } => *public_key,
-                    _ => unreachable!(),
-                },
-                member.0.to_string(),
-            )
-        })
-        .collect::<HashMap<CortadoAffine, String>>()
-}
-
-fn map_users_to_leaf_ids(
-    leafs: LeafIter<'_, CortadoAffine>,
-    leafs_to_users: HashMap<CortadoAffine, String>,
-) -> HashMap<String, usize> {
-    leafs
-        .filter(|node| match node {
-            ARTNode::Leaf { status, .. } => LeafStatus::Blank != *status,
-            _ => unreachable!(),
-        })
-        .enumerate()
-        .map(|(i, node)| {
-            (
-                leafs_to_users
-                    .get(match node {
-                        ARTNode::Leaf { public_key, .. } => public_key,
-                        _ => unreachable!(),
-                    })
-                    .expect("")
-                    .to_string(),
-                i,
-            )
-        })
-        .collect::<HashMap<String, usize>>()
 }

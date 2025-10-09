@@ -22,7 +22,7 @@ pub fn set_proof_system(ps: ProofSystem) -> Result<(), ProofSystem> {
 }
 
 pub fn get_proof_system() -> &'static ProofSystem {
-    PROOF_SYSTEM.get_or_init(|| ProofSystem::default())
+    PROOF_SYSTEM.get_or_init(ProofSystem::default)
 }
 
 pub struct ProofSystem {

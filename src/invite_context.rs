@@ -1,12 +1,11 @@
 use crate::{
     error::{Error, Result},
-    group_context::PendingGroupContext,
-    group_state::GroupState,
     models::{
-        group_info::{GroupInfo, GroupMembers},
+        group_info::GroupInfo,
         invite::{Invite, Invitee, ProtectedInviteData},
     },
     utils::{decrypt, hkdf},
+    validator::{GroupContext, KeyedValidator, Nonce},
 };
 use ark_ec::{AffineRepr, CurveGroup};
 use chrono::Utc;
@@ -14,7 +13,7 @@ use cortado::{self, CortadoAffine, Fr as ScalarField};
 use sha3::Sha3_256;
 use tracing::{debug, info, instrument, trace};
 use uuid::Uuid;
-use zrt_art::types::PublicART;
+use zrt_art::types::{PrivateART, PublicART};
 use zrt_crypto::schnorr;
 
 pub struct InviteContext {
@@ -127,26 +126,15 @@ impl InviteContext {
         (CortadoAffine::generator() * self.leaf_secret).into_affine()
     }
 
-    pub fn upgrade(self, art: PublicART<CortadoAffine>) -> Result<PendingGroupContext> {
-        let state = GroupState::from_parts(
-            self.leaf_secret,
-            art,
-            self.stk,
-            self.epoch,
-            GroupInfo::new(
-                self.group_id,
-                String::new(),
-                Utc::now(),
-                vec![],
-                GroupMembers::default(),
-            ),
-            false,
-        )?;
-
-        Ok(PendingGroupContext::from_state(
+    pub fn upgrade(self, art: PublicART<CortadoAffine>) -> Result<GroupContext> {
+        let base_art = PrivateART::from_public_art_and_secret(art, self.leaf_secret)?;
+        Ok(GroupContext::from_parts(
             self.identity_secret_key,
-            state,
-        )?)
+            KeyedValidator::new(base_art, self.stk, self.epoch),
+            GroupInfo::new(self.group_id, String::new(), Utc::now(), vec![]),
+            0,
+            Nonce::new(0),
+        ))
     }
 }
 

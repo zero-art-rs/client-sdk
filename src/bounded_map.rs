@@ -3,6 +3,7 @@ use std::hash::Hash;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
+use serde_bytes::ByteBuf;
 
 #[derive(Debug, Clone)]
 pub struct BoundedMap<K, V> {
@@ -35,6 +36,10 @@ impl<K: Eq + Hash, V: CanonicalSerialize + CanonicalDeserialize> BoundedMap<K, V
 
     pub fn len(&self) -> usize {
         self.map.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
     }
 
     pub fn capacity(&self) -> usize {
@@ -102,4 +107,28 @@ where
             capacity: helper.capacity,
         })
     }
+}
+
+/// Adapter for serialization of arkworks-compatible types using CanonicalSerialize
+pub fn ark_se<S, A: CanonicalSerialize>(a: &A, s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let mut bytes = vec![];
+    a.serialize_with_mode(&mut bytes, ark_serialize::Compress::Yes)
+        .map_err(serde::ser::Error::custom)?;
+    s.serialize_bytes(&bytes)
+}
+/// Adapter for deserialization of arkworks-compatible types using CanonicalDeserialize
+pub fn ark_de<'de, D, A: CanonicalDeserialize>(data: D) -> Result<A, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+{
+    let s: ByteBuf = serde::de::Deserialize::deserialize(data)?;
+    let a = A::deserialize_with_mode(
+        s.as_slice(),
+        ark_serialize::Compress::Yes,
+        ark_serialize::Validate::Yes,
+    );
+    a.map_err(serde::de::Error::custom)
 }

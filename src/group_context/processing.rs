@@ -4,7 +4,7 @@ use sha3::Sha3_256;
 use tracing::{instrument, trace};
 use zrt_art::{
     traits::{ARTPrivateAPI, ARTPublicAPI},
-    types::{ARTNode, LeafStatus},
+    types::ARTNode,
 };
 
 use crate::{
@@ -12,7 +12,7 @@ use crate::{
     group_context::GroupContext,
     models::{
         self,
-        group_info::{GroupInfo, public_key_to_id},
+        group_info::GroupInfo,
         payload::{GroupActionPayload, Payload},
     },
 };
@@ -31,7 +31,7 @@ impl GroupContext {
 
         let epoch = frame.frame_tbs().epoch();
         if frame.frame_tbs().group_operation().is_none() {
-            if self.group_info().members().len() == 0 {
+            if self.group_info().members().is_empty() {
                 return Err(Error::InvalidInput);
             }
 
@@ -72,11 +72,9 @@ impl GroupContext {
         }
 
         match frame.frame_tbs().group_operation().unwrap() {
-            models::frame::GroupOperation::Init(_) => {
-                return Ok(vec![]);
-            }
+            models::frame::GroupOperation::Init(_) => Ok(vec![]),
             models::frame::GroupOperation::AddMember(changes) => {
-                if self.group_info().members().len() == 0 {
+                if self.group_info().members().is_empty() {
                     let protected_payload =
                         models::protected_payload::ProtectedPayload::decode(&self.state.decrypt(
                             frame.frame_tbs().protected_payload(),
@@ -101,9 +99,15 @@ impl GroupContext {
 
                     let mut group_info = group_infos[0].clone();
                     for user in self.state.group_info.members().iter() {
-                        group_info
-                            .members_mut()
-                            .insert(user.id().to_string(), user.clone());
+                        group_info.members_mut().insert(
+                            self.state
+                                .group_info
+                                .members()
+                                .get_leaf(user.id())
+                                .ok_or(Error::InvalidInput)?
+                                .to_owned(),
+                            user.clone(),
+                        );
                     }
 
                     self.state.group_info = group_info;
@@ -121,12 +125,12 @@ impl GroupContext {
                     return Err(Error::InvalidEpoch);
                 }
 
-                let verifier_artefacts = self.state.verifier_artefacts(&changes)?;
+                let verifier_artefacts = self.state.verifier_artefacts(changes)?;
                 let owner_leaf_public_key = self.state.owner_public_key()?;
 
                 frame.verify_art::<Sha3_256>(verifier_artefacts, owner_leaf_public_key)?;
 
-                self.state.update_art(&changes)?;
+                self.state.update_art(changes)?;
 
                 // TODO: Implement rollback mechanism, because after tree update there can be unrecoverable errors
                 let protected_payload =
@@ -147,10 +151,10 @@ impl GroupContext {
                 protected_payload.verify::<Sha3_256>(sender.public_key())?;
                 self.state.is_last_sender = false;
 
-                return Ok(protected_payload
+                Ok(protected_payload
                     .protected_payload_tbs()
                     .payloads()
-                    .to_vec());
+                    .to_vec())
             }
             models::frame::GroupOperation::KeyUpdate(changes) => {
                 if self.state.epoch >= frame.frame_tbs().epoch() {
@@ -160,7 +164,7 @@ impl GroupContext {
                     return Err(Error::InvalidEpoch);
                 }
 
-                let verifier_artefacts = self.state.verifier_artefacts(&changes)?;
+                let verifier_artefacts = self.state.verifier_artefacts(changes)?;
 
                 let old_leaf_public_key = match self.state.art.get_node(&changes.node_index)? {
                     ARTNode::Leaf { public_key, .. } => *public_key,
@@ -169,7 +173,7 @@ impl GroupContext {
 
                 frame.verify_art::<Sha3_256>(verifier_artefacts, old_leaf_public_key)?;
 
-                self.state.update_art(&changes)?;
+                self.state.update_art(changes)?;
 
                 let protected_payload =
                     models::protected_payload::ProtectedPayload::decode(&self.state.decrypt(
@@ -193,12 +197,20 @@ impl GroupContext {
                 for user in new_users {
                     group_info
                         .members_mut()
-                        .replace(&public_key_to_id(old_leaf_public_key), user);
+                        .update_user(old_leaf_public_key, user);
+                    group_info.members_mut().update_leaf(
+                        old_leaf_public_key,
+                        changes
+                            .public_keys
+                            .last()
+                            .ok_or(Error::InvalidInput)?
+                            .to_owned(),
+                    );
                 }
 
                 let sender = match protected_payload.protected_payload_tbs().sender() {
                     models::protected_payload::Sender::UserId(id) => {
-                        group_info.members().get(&id).ok_or(Error::InvalidInput)?
+                        group_info.members().get(id).ok_or(Error::InvalidInput)?
                     }
                     _ => unimplemented!(),
                 };
@@ -209,10 +221,10 @@ impl GroupContext {
 
                 self.state.is_last_sender = false;
 
-                return Ok(protected_payload
+                Ok(protected_payload
                     .protected_payload_tbs()
                     .payloads()
-                    .to_vec());
+                    .to_vec())
             }
             models::frame::GroupOperation::RemoveMember(changes) => {
                 if self.state.epoch >= frame.frame_tbs().epoch() {
@@ -225,7 +237,7 @@ impl GroupContext {
                     return Err(Error::InvalidEpoch);
                 }
 
-                let verifier_artefacts = self.state.verifier_artefacts(&changes)?;
+                let verifier_artefacts = self.state.verifier_artefacts(changes)?;
                 let owner_leaf_public_key = self.state.owner_public_key()?;
 
                 frame.verify_art::<Sha3_256>(verifier_artefacts, owner_leaf_public_key)?;
@@ -246,14 +258,14 @@ impl GroupContext {
                     return Err(Error::UserRemovedFromGroup);
                 }
 
-                let leafs_users = self.state.map_leafs_to_users();
+                // let leafs_users = self.state.map_leafs_to_users();
 
-                self.state.update_art(&changes)?;
+                self.state.update_art(changes)?;
 
-                let user_to_delete = leafs_users.get(&leaf_public_key);
-                if let Some(user_id) = user_to_delete {
-                    self.state.group_info.members_mut().remove(user_id);
-                };
+                // let user_to_delete = leafs_users.get(&leaf_public_key);
+                // if let Some(user_id) = user_to_delete {
+                //     self.state.group_info.members_mut().remove(user_id);
+                // };
 
                 let protected_payload =
                     models::protected_payload::ProtectedPayload::decode(&self.state.decrypt(
@@ -273,10 +285,10 @@ impl GroupContext {
                 protected_payload.verify::<Sha3_256>(sender.public_key())?;
                 self.state.is_last_sender = false;
 
-                return Ok(protected_payload
+                Ok(protected_payload
                     .protected_payload_tbs()
                     .payloads()
-                    .to_vec());
+                    .to_vec())
             }
             _ => unimplemented!(),
         }

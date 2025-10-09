@@ -126,7 +126,7 @@ impl InviteTbs {
         )?;
         Ok(Invite {
             invite_tbs: self,
-            signature: signature,
+            signature,
         })
     }
 
@@ -188,7 +188,7 @@ impl TryFrom<zero_art_proto::invite_tbs::Invite> for Invitee {
         match value {
             zero_art_proto::invite_tbs::Invite::IdentifiedInvite(inv) => {
                 let identity_public_key = deserialize(&inv.identity_public_key)?;
-                let spk_public_key = if inv.spk_public_key.len() == 0 {
+                let spk_public_key = if inv.spk_public_key.is_empty() {
                     None
                 } else {
                     Some(deserialize(&inv.spk_public_key)?)

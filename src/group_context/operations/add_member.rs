@@ -1,20 +1,17 @@
-use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::UniformRand;
 use sha3::Sha3_256;
 use tracing::{debug, info, instrument, trace};
 
 use crate::{
     error::Result,
-    group_context::{GroupContext, map_users_to_leaf_ids},
+    group_context::GroupContext,
     models::{
         frame::{Frame, GroupOperation},
-        group_info::{User, public_key_to_id},
         invite::{Invite, Invitee},
         payload::{GroupActionPayload, Payload},
     },
-    zero_art_proto,
 };
-use cortado::{CortadoAffine, Fr as ScalarField};
+use cortado::Fr as ScalarField;
 
 impl GroupContext {
     #[instrument(skip(self, invitee, payloads))]
@@ -36,7 +33,6 @@ impl GroupContext {
 
         // 2. Compute new member's leaf secret
         let leaf_secret = self.compute_leaf_secret_for_invitee(invitee, ephemeral_secret_key)?;
-        let leaf_public_key = (CortadoAffine::generator() * leaf_secret).into_affine();
         debug!("Leaf secret computed");
         trace!("Leaf secret: {:?}", leaf_secret);
 
@@ -44,33 +40,12 @@ impl GroupContext {
 
         // Since leafs in tree can be added also not only to right
         // we need to reorder group members to follow non blank leafs order
-        let mut leaf_member_map = pending_state.map_leafs_to_users();
 
         let (changes, prover_artefacts) = pending_state.append_leaf(&leaf_secret)?;
         debug!("Node added to ART: {:?}", changes);
 
-        let user = User::new_with_id(
-            public_key_to_id(leaf_public_key),
-            String::from("Invited"),
-            CortadoAffine::default(),
-            vec![],
-            zero_art_proto::Role::Write,
-        );
-        let user_id = user.id().to_string();
-
         // Since leafs in tree can be added also not only to right
         // we need to reorder group members to follow non blank leafs order
-        pending_state
-            .group_info
-            .members_mut()
-            .insert(user_id.clone(), user);
-        leaf_member_map.insert(leaf_public_key, user_id);
-
-        let members_order = map_users_to_leaf_ids(pending_state.iter_leafs(), leaf_member_map);
-        pending_state
-            .group_info
-            .members_mut()
-            .reorder(members_order);
 
         // 4. Add payload with group info
         payloads.push(Payload::Action(GroupActionPayload::InviteMember(
