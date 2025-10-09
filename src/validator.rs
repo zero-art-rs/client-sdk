@@ -774,6 +774,10 @@ impl Nonce {
         self.0 += 1;
         nonce
     }
+
+    pub fn value(&self) -> u64 {
+        self.0
+    }
 }
 
 #[derive(Debug)]
