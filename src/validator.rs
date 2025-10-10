@@ -360,8 +360,7 @@ impl KeyedValidator {
 
         if self.changes.contains_key(&changes_id) {
             trace!("Changes already applied");
-
-            return Err(Error::InvalidInput);
+            return Err(Error::ChangesAlreadyApplied);
         }
 
         if let Some(&secret_key) = self.participation_leafs.get(&changes_id) {
@@ -434,7 +433,7 @@ impl KeyedValidator {
 
         if self.changes.contains_key(&changes_id) {
             trace!("Changes already applied");
-            return Err(Error::InvalidInput);
+            return Err(Error::ChangesAlreadyApplied);
         }
 
         // Derive current stk and art

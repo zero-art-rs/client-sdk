@@ -1,10 +1,7 @@
 use ark_ec::AffineRepr;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use cortado::CortadoAffine;
-use sha3::{Digest, Sha3_256};
 use zrt_art::types::{BranchChanges, ProverArtefacts};
-
-use crate::error::Result;
 
 #[derive(Debug)]
 pub enum GroupOperation<G: AffineRepr + CanonicalSerialize + CanonicalDeserialize> {
@@ -35,7 +32,7 @@ pub type AddMemberProposal = Proposal<CortadoAffine>;
 pub type RemoveMemberProposal = Proposal<CortadoAffine>;
 pub type UpdateKeyProposal = Proposal<CortadoAffine>;
 pub type ValidationResult = Option<GroupOperation<CortadoAffine>>;
-pub type ValidationWithKeyResult = (Option<GroupOperation<CortadoAffine>>, StageKey);
+pub type ValidationWithKeyResult = (ValidationResult, StageKey);
 
 pub type StageKey = [u8; 32];
 pub type ChangesID = [u8; 8];

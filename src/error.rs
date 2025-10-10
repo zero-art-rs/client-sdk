@@ -54,6 +54,9 @@ pub enum Error {
     UserRemovedFromGroup,
     #[error("User don't have permission for action")]
     Forbidden,
+
+    #[error("Changes already applied or merged")]
+    ChangesAlreadyApplied
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

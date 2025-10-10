@@ -17,16 +17,31 @@ pub trait Validator {
 pub trait KeyedValidator: Validator {
     fn validate_and_derive_key(&mut self, frame: &Frame) -> Result<ValidationWithKeyResult>;
     fn propose_add_member(&self, leaf_secret: ScalarField) -> Result<AddMemberProposal>;
-    fn propose_remove_member(&self, leaf: CortadoAffine) -> Result<RemoveMemberProposal>;
-    fn propose_update_key(&self, leaf_secret: ScalarField) -> Result<UpdateKeyProposal>;
+    fn propose_remove_member(&self, leaf: CortadoAffine, vanishing_secret_key: ScalarField) -> Result<RemoveMemberProposal>;
+    // TODO: Migrate to immutable ref
+    fn propose_update_key(&mut self) -> Result<UpdateKeyProposal>;
     fn sign_with_tree_key(&self, message: &[u8]) -> Result<Vec<u8>>;
-    fn sign_with_leaf_key();
+    fn sign_with_leaf_key(&self, message: &[u8]) -> Result<Vec<u8>>;
 }
 
-pub trait Parts: Sized {
+pub trait Decompose {
     type Parts;
 
-    fn to_parts(&self) -> Self::Parts;
-    fn into_parts(self) -> Self::Parts;
-    fn from_parts(parts: Self::Parts) -> Self;
+    fn decompose(self) -> Self::Parts;
+}
+
+pub trait Compose<P> {
+    fn compose(parts: P) -> Self;
+}
+
+pub trait TryDecompose {
+    type Parts;
+
+    fn try_decompose(self) -> Result<Self::Parts>;
+}
+
+pub trait TryCompose<P> {
+    fn try_compose(parts: P) -> Result<Self>
+    where
+        Self: Sized;
 }
