@@ -37,7 +37,7 @@ impl Nonce {
         Self(value)
     }
 
-    pub fn next(&mut self) -> Vec<u8> {
+    pub fn advance(&mut self) -> Vec<u8> {
         let nonce = self.0.to_le_bytes().to_vec();
         self.0 += 1;
         nonce
@@ -292,7 +292,7 @@ impl GroupContext {
         let mut frame_tbs = FrameTbs::new(
             self.group_info.id(),
             epoch,
-            self.nonce.next(),
+            self.nonce.advance(),
             Some(GroupOperation::AddMember(proposal.changes)),
             vec![],
         );
@@ -373,7 +373,7 @@ impl GroupContext {
         let mut frame_tbs = FrameTbs::new(
             self.group_info.id(),
             epoch,
-            self.nonce.next(),
+            self.nonce.advance(),
             Some(GroupOperation::RemoveMember(proposal.changes)),
             vec![],
         );
@@ -414,7 +414,7 @@ impl GroupContext {
             let mut frame_tbs = FrameTbs::new(
                 self.group_info.id(),
                 validator.epoch(),
-                self.nonce.next(),
+                self.nonce.advance(),
                 None,
                 vec![],
             );
@@ -435,7 +435,7 @@ impl GroupContext {
             let mut frame_tbs = FrameTbs::new(
                 self.group_info.id(),
                 validator.epoch() + 1,
-                self.nonce.next(),
+                self.nonce.advance(),
                 Some(GroupOperation::KeyUpdate(proposal.changes)),
                 vec![],
             );
@@ -478,7 +478,7 @@ impl GroupContext {
         let mut frame_tbs = FrameTbs::new(
             self.group_info.id(),
             epoch,
-            self.nonce.next(),
+            self.nonce.advance(),
             Some(GroupOperation::KeyUpdate(proposal.changes)),
             vec![],
         );

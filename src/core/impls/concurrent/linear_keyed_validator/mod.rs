@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use ark_ec::{AffineRepr, CurveGroup};
 use serde::{Deserialize, Serialize};
-use sha3::{Digest, Sha3_256};
+use sha3::Sha3_256;
+use tracing::{instrument, span, trace, Level};
 use zrt_art::{
     traits::{ARTPrivateAPI, ARTPublicAPI, ARTPublicView},
     types::{BranchChanges, LeafStatus, PrivateART, PublicART},
@@ -24,6 +25,8 @@ use crate::{
     utils::{compute_changes_id, derive_leaf_key, derive_stage_key, deserialize},
 };
 use cortado::{self, CortadoAffine, Fr as ScalarField};
+
+mod merge_strategy;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Participant {
@@ -68,18 +71,33 @@ impl Validator for LinearKeyedValidator {
 }
 
 impl KeyedValidator for LinearKeyedValidator {
+    #[instrument(skip_all)]
     fn validate_and_derive_key(&mut self, frame: &frame::Frame) -> Result<ValidationWithKeyResult> {
+        trace!("Frame: {:?}", frame);
+        
+        trace!("Validator epoch: {}", self.epoch);
         let frame_epoch = frame.frame_tbs().epoch();
+        trace!("Frame epoch: {frame_epoch}");
 
         if frame_epoch != self.epoch && frame_epoch != self.epoch + 1 {
             return Err(Error::InvalidEpoch);
         }
 
         let is_next_epoch = frame_epoch == self.epoch + 1;
+        trace!("Is next epoch: {is_next_epoch}");
 
         // If frame don't have group operation then it is just payload frame that should have current epoch
+        trace!("Group operation: {:?}", frame.frame_tbs().group_operation());
         if frame.frame_tbs().group_operation().is_none() && !is_next_epoch {
+            let span = span!(Level::TRACE, "Payload frame");
+            let _enter = span.enter();
+
+            trace!(
+                "Upstream root public key: {:?}",
+                self.upstream_art.get_root().get_public_key()
+            );
             frame.verify_schnorr::<Sha3_256>(self.upstream_art.get_root().get_public_key())?;
+            trace!("Upstream stage key: {:?}", self.upstream_stk);
             return Ok((None, self.upstream_stk));
         }
 
@@ -98,49 +116,72 @@ impl KeyedValidator for LinearKeyedValidator {
 
         match group_operation {
             frame::GroupOperation::AddMember(changes) => {
-                println!("IsNextEpoch: {}", is_next_epoch);
+                let span = span!(Level::TRACE, "Add member frame");
+                let _enter = span.enter();
 
-                if !is_next_epoch {
-                    return Err(Error::InvalidEpoch);
-                }
+                trace!("Changes: {:?}", changes);
 
                 let (verifier_artefacts, public_key) = if is_next_epoch {
                     let verifier_artefacts = self
                         .upstream_art
                         .compute_artefacts_for_verification(changes)?;
+                    trace!(
+                        "Verifier artefacts based on upstream: {:?}",
+                        verifier_artefacts
+                    );
                     let public_key = group_owner_leaf_public_key(&self.upstream_art);
+                    trace!("Upstream owner leaf key: {:?}", public_key);
                     (verifier_artefacts, public_key)
                 } else {
                     let verifier_artefacts =
                         self.base_art.compute_artefacts_for_verification(changes)?;
+                    trace!("Verifier artefacts based on base: {:?}", verifier_artefacts);
                     let public_key = group_owner_leaf_public_key(&self.base_art);
+                    trace!("Base owner leaf key: {:?}", public_key);
                     (verifier_artefacts, public_key)
                 };
 
                 frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
+                
                 let operation = GroupOperation::AddMember {
                     member_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
+                if !is_next_epoch {
+                    return Ok((Some(operation), self.upstream_stk));
+                }
 
-                Ok((Some(operation), self.apply_changes(changes)?))
+                Ok((
+                    Some(operation),
+                    self.apply_changes(changes)?,
+                ))
             }
             frame::GroupOperation::KeyUpdate(changes) => {
+                let span = span!(Level::TRACE, "Key update frame");
+                let _enter = span.enter();
+
                 let (verifier_artefacts, public_key) = if is_next_epoch {
                     let verifier_artefacts = self
                         .upstream_art
                         .compute_artefacts_for_verification(changes)?;
+                    trace!(
+                        "Verifier artefacts based on upstream: {:?}",
+                        verifier_artefacts
+                    );
                     let public_key = self
                         .upstream_art
                         .get_node(&changes.node_index)?
                         .get_public_key();
+                    trace!("Upstream member leaf key: {:?}", public_key);
                     (verifier_artefacts, public_key)
                 } else {
                     let verifier_artefacts =
                         self.base_art.compute_artefacts_for_verification(changes)?;
+                    trace!("Verifier artefacts based on base: {:?}", verifier_artefacts);
                     let public_key = self
                         .base_art
                         .get_node(&changes.node_index)?
                         .get_public_key();
+                    trace!("Base member leaf key: {:?}", public_key);
                     (verifier_artefacts, public_key)
                 };
 
@@ -352,142 +393,6 @@ impl LinearKeyedValidator {
 
     pub fn deserialize(value: &[u8]) -> Result<Self> {
         postcard::from_bytes(value).map_err(|e| e.into())
-    }
-
-    fn merge_changes_and_participate(
-        &mut self,
-        changes_id: ChangesID,
-        changes: BranchChanges<CortadoAffine>,
-        secret_key: ScalarField,
-    ) -> Result<StageKey> {
-        let mut upstream_art = self.base_art.clone();
-        let (tree_key, _, _) = upstream_art.update_key(&secret_key)?;
-        let branch_stk = derive_stage_key(&self.base_stk, tree_key.key)?;
-
-        let participant = Participant {
-            id: changes_id,
-            branch: changes.clone(),
-            art: upstream_art.clone(),
-        };
-
-        upstream_art.merge_for_participant(
-            changes.clone(),
-            &self
-                .changes
-                .values()
-                .cloned()
-                .collect::<Vec<BranchChanges<CortadoAffine>>>(),
-            self.base_art.clone(),
-        )?;
-        let upstream_stk = derive_stage_key(&self.base_stk, upstream_art.get_root_key()?.key)?;
-
-        self.upstream_art = upstream_art;
-        self.upstream_stk = upstream_stk;
-
-        self.participant = Some(participant);
-        self.changes.insert(changes_id, changes);
-
-        Ok(branch_stk)
-    }
-
-    fn merge_changes(&mut self, changes: &BranchChanges<CortadoAffine>) -> Result<StageKey> {
-        // Should never panic
-        let changes_id: ChangesID = Sha3_256::digest(changes.serialize()?).to_vec()[..8]
-            .try_into()
-            .unwrap();
-
-        if self.changes.contains_key(&changes_id) {
-            return Err(Error::ChangesAlreadyApplied);
-        }
-
-        if let Some(&secret_key) = self.participation_leafs.get(&changes_id) {
-            return self.merge_changes_and_participate(changes_id, changes.clone(), secret_key);
-        }
-
-        // Derive branch stk to decrypt payload
-        let mut branch_art = self.base_art.clone();
-        branch_art.update_private_art(changes)?;
-        let branch_stk = derive_stage_key(&self.base_stk, branch_art.get_root_key()?.key)?;
-
-        let upstream_art = if let Some(participant) = &self.participant {
-            // Derive upstream art and stk to advance epoch and encrypt new payloads
-            let mut upstream_art = participant.art.clone();
-            let target_changes = self
-                .changes
-                .iter()
-                .filter(|&(&id, _)| (id != participant.id))
-                .map(|(_, c)| c.clone())
-                .chain(std::iter::once(changes.clone()))
-                .collect::<Vec<_>>();
-
-            upstream_art.merge_for_participant(
-                participant.branch.clone(),
-                &target_changes,
-                self.base_art.clone(),
-            )?;
-
-            upstream_art
-        } else {
-            let mut upstream_art = self.base_art.clone();
-            upstream_art
-                .merge_for_observer(&self.changes.clone().into_values().collect::<Vec<_>>())?;
-
-            upstream_art
-        };
-
-        let upstream_stk = derive_stage_key(&self.base_stk, upstream_art.get_root_key()?.key)?;
-
-        self.upstream_art = upstream_art;
-        self.upstream_stk = upstream_stk;
-
-        self.changes.insert(changes_id, changes.clone());
-
-        Ok(branch_stk)
-    }
-
-    fn apply_changes(&mut self, changes: &BranchChanges<CortadoAffine>) -> Result<StageKey> {
-        // Should never panic
-        let changes_id: ChangesID = Sha3_256::digest(changes.serialize()?).to_vec()[..8]
-            .try_into()
-            .unwrap();
-
-        if self.changes.contains_key(&changes_id) {
-            return Err(Error::ChangesAlreadyApplied);
-        }
-
-        // Derive current stk and art
-        let mut upstream_art = self.upstream_art.clone();
-
-        let participant = if let Some(&secret_key) = self.participation_leafs.get(&changes_id) {
-            upstream_art.update_key(&secret_key)?;
-
-            let participant = Participant {
-                id: changes_id,
-                branch: changes.clone(),
-                art: upstream_art.clone(),
-            };
-            Some(participant)
-        } else {
-            upstream_art.update_private_art(changes)?;
-            None
-        };
-
-        let upstream_stk = derive_stage_key(&self.upstream_stk, upstream_art.get_root_key()?.key)?;
-
-        // Advance base
-        self.base_art = self.upstream_art.clone();
-        self.base_stk = self.upstream_stk;
-
-        // Advance current
-        self.upstream_art = upstream_art;
-        self.upstream_stk = upstream_stk;
-
-        self.participant = participant;
-        self.changes = HashMap::new();
-        self.changes.insert(changes_id, changes.clone());
-        self.epoch += 1;
-
-        Ok(self.upstream_stk)
     }
 
     pub fn is_participant(&self) -> bool {

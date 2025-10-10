@@ -1,5 +1,6 @@
 use ark_ff::UniformRand;
 use ark_std::rand::{SeedableRng, rngs::StdRng};
+use sha3::Digest;
 use uuid::Uuid;
 
 use crate::{models::frame, proof_system::get_proof_system, types::StageKey, utils::encrypt};

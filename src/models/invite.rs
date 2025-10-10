@@ -58,8 +58,9 @@ impl TryFrom<zero_art_proto::Invite> for Invite {
     type Error = Error;
 
     fn try_from(value: zero_art_proto::Invite) -> Result<Self> {
+        let invite_tbs = value.invite.ok_or(Error::RequiredFieldAbsent)?.try_into()?;
         Ok(Self {
-            invite_tbs: value.invite.ok_or(Error::RequiredFieldAbsent)?.try_into()?,
+            invite_tbs,
             signature: value.signature,
         })
     }
@@ -147,11 +148,12 @@ impl TryFrom<zero_art_proto::InviteTbs> for InviteTbs {
     fn try_from(value: zero_art_proto::InviteTbs) -> Result<Self> {
         let inviter_public_key = deserialize(&value.identity_public_key)?;
         let ephemeral_public_key = deserialize(&value.ephemeral_public_key)?;
+        let invitee = value
+            .invite
+            .ok_or(Error::InvalidVerificationMethod)?
+            .try_into()?;
         Ok(Self {
-            invitee: value
-                .invite
-                .ok_or(Error::InvalidVerificationMethod)?
-                .try_into()?,
+            invitee,
             inviter_public_key,
             ephemeral_public_key,
             protected_invite_data: value.protected_invite_data,
@@ -222,18 +224,21 @@ impl TryFrom<Invitee> for zero_art_proto::invite_tbs::Invite {
                     spk_public_key_bytes = serialize(spk_public_key)?;
                 }
 
+                let identified_invite = zero_art_proto::IdentifiedInvite {
+                    identity_public_key: identity_public_key_bytes,
+                    spk_public_key: spk_public_key_bytes,
+                };
+
                 Ok(zero_art_proto::invite_tbs::Invite::IdentifiedInvite(
-                    zero_art_proto::IdentifiedInvite {
-                        identity_public_key: identity_public_key_bytes,
-                        spk_public_key: spk_public_key_bytes,
-                    },
+                    identified_invite,
                 ))
             }
             Invitee::Unidentified(secret_key) => {
+                let unidentified_invite = zero_art_proto::UnidentifiedInvite {
+                    private_key: serialize(secret_key)?,
+                };
                 Ok(zero_art_proto::invite_tbs::Invite::UnidentifiedInvite(
-                    zero_art_proto::UnidentifiedInvite {
-                        private_key: serialize(secret_key)?,
-                    },
+                    unidentified_invite,
                 ))
             }
         }
@@ -284,12 +289,13 @@ impl TryFrom<zero_art_proto::ProtectedInviteData> for ProtectedInviteData {
     type Error = Error;
 
     fn try_from(value: zero_art_proto::ProtectedInviteData) -> Result<Self> {
+        let stage_key = value
+            .stage_key
+            .try_into()
+            .map_err(|_| Error::InvalidVerificationMethod)?;
         Ok(Self {
             epoch: value.epoch,
-            stage_key: value
-                .stage_key
-                .try_into()
-                .map_err(|_| Error::InvalidVerificationMethod)?,
+            stage_key,
             group_id: Uuid::parse_str(&value.group_id).map_err(|_| Error::InvalidInput)?,
         })
     }
