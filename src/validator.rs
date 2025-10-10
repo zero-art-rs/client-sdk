@@ -973,9 +973,6 @@ impl GroupContext {
     pub fn create_frame(&mut self, payloads: Vec<Payload>) -> Result<Frame> {
         let mut validator = self.validator.lock().unwrap();
 
-        // Future epoch
-        let epoch = validator.epoch() + 1;
-
         let protected_payload_tbs = ProtectedPayloadTbs::new(
             self.seq_num,
             Utc::now(),
@@ -988,7 +985,7 @@ impl GroupContext {
         // Predict add member changes
         let frame = if validator.is_participant() {
             let mut frame_tbs =
-                FrameTbs::new(self.group_info.id(), epoch, self.nonce.next(), None, vec![]);
+                FrameTbs::new(self.group_info.id(), validator.epoch(), self.nonce.next(), None, vec![]);
 
             let encrypted_protected_payload = validator.encrypt(
                 &protected_payload.encode_to_vec(),
@@ -1002,7 +999,7 @@ impl GroupContext {
 
             let mut frame_tbs = FrameTbs::new(
                 self.group_info.id(),
-                epoch,
+                validator.epoch() + 1,
                 self.nonce.next(),
                 Some(GroupOperation::KeyUpdate(changes)),
                 vec![],
