@@ -131,10 +131,6 @@ impl KeyedValidator {
 
                 trace!("Changes: {:?}", changes);
 
-                if !is_next_epoch {
-                    return Err(Error::InvalidEpoch);
-                }
-
                 let (verifier_artefacts, public_key) = if is_next_epoch {
                     let verifier_artefacts = self
                         .upstream_art
@@ -156,9 +152,13 @@ impl KeyedValidator {
                 };
 
                 frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
+                
                 let operation = types::GroupOperation::AddMember {
                     member_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
+                if !is_next_epoch {
+                    return Ok((Some(operation), decrypt_factory(self.upstream_stk)));
+                }
 
                 Ok((
                     Some(operation),
