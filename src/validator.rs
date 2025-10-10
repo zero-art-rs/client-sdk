@@ -3,6 +3,7 @@ use ark_ff::UniformRand;
 use ark_std::rand::thread_rng;
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
+use tracing::{instrument, span, trace, Level};
 use std::{collections::HashMap, sync::Mutex};
 use zrt_crypto::schnorr;
 use zrt_zk::art::ARTProof;
@@ -69,6 +70,7 @@ impl KeyedValidator {
         }
     }
 
+    #[instrument(skip_all)]
     pub fn validate(
         &mut self,
         frame: &Frame,
@@ -76,17 +78,28 @@ impl KeyedValidator {
         Option<types::GroupOperation<CortadoAffine>>,
         impl Fn(&[u8], &[u8]) -> Result<Vec<u8>> + 'static,
     )> {
+        trace!("Frame: {:?}", frame);
+
+        trace!("Validator epoch: {}", self.epoch);
         let frame_epoch = frame.frame_tbs().epoch();
+        trace!("Frame epoch: {frame_epoch}");
 
         if frame_epoch != self.epoch && frame_epoch != self.epoch + 1 {
             return Err(Error::InvalidEpoch);
         }
 
         let is_next_epoch = frame_epoch == self.epoch + 1;
+        trace!("Is next epoch: {is_next_epoch}");
 
         // If frame don't have group operation then it is just payload frame that should have current epoch
+        trace!("Group operation: {:?}", frame.frame_tbs().group_operation());
         if frame.frame_tbs().group_operation().is_none() && !is_next_epoch {
+            let span = span!(Level::TRACE, "Payload frame");
+            let _enter = span.enter();
+
+            trace!("Upstream root public key: {:?}", self.upstream_art.get_root().get_public_key());
             frame.verify_schnorr::<Sha3_256>(self.upstream_art.get_root().get_public_key())?;
+            trace!("Upstream stage key: {:?}", self.upstream_stk);
             return Ok((None, decrypt_factory(self.upstream_stk)));
         }
 
@@ -95,6 +108,7 @@ impl KeyedValidator {
             Some(GroupOperation::Init(_))
         ) && frame_epoch != 0
         {
+
             return Err(Error::InvalidEpoch);
         }
 
@@ -105,7 +119,10 @@ impl KeyedValidator {
 
         match group_operation {
             GroupOperation::AddMember(changes) => {
-                println!("IsNextEpoch: {}", is_next_epoch);
+                let span = span!(Level::TRACE, "Add member frame");
+                let _enter = span.enter();
+
+                trace!("Changes: {:?}", changes);
 
                 if !is_next_epoch {
                     return Err(Error::InvalidEpoch);
@@ -115,12 +132,16 @@ impl KeyedValidator {
                     let verifier_artefacts = self
                         .upstream_art
                         .compute_artefacts_for_verification(changes)?;
+                    trace!("Verifier artefacts based on upstream: {:?}", verifier_artefacts);
                     let public_key = group_owner_leaf_public_key(&self.upstream_art);
+                    trace!("Upstream owner leaf key: {:?}", public_key);
                     (verifier_artefacts, public_key)
                 } else {
                     let verifier_artefacts =
                         self.base_art.compute_artefacts_for_verification(changes)?;
+                    trace!("Verifier artefacts based on base: {:?}", verifier_artefacts);
                     let public_key = group_owner_leaf_public_key(&self.base_art);
+                    trace!("Base owner leaf key: {:?}", public_key);
                     (verifier_artefacts, public_key)
                 };
 
@@ -135,22 +156,29 @@ impl KeyedValidator {
                 ))
             }
             GroupOperation::KeyUpdate(changes) => {
+                let span = span!(Level::TRACE, "Key update frame");
+                let _enter = span.enter();
+
                 let (verifier_artefacts, public_key) = if is_next_epoch {
                     let verifier_artefacts = self
                         .upstream_art
                         .compute_artefacts_for_verification(changes)?;
+                    trace!("Verifier artefacts based on upstream: {:?}", verifier_artefacts);
                     let public_key = self
                         .upstream_art
                         .get_node(&changes.node_index)?
                         .get_public_key();
+                    trace!("Upstream member leaf key: {:?}", public_key);
                     (verifier_artefacts, public_key)
                 } else {
                     let verifier_artefacts =
                         self.base_art.compute_artefacts_for_verification(changes)?;
+                    trace!("Verifier artefacts based on base: {:?}", verifier_artefacts);
                     let public_key = self
                         .base_art
                         .get_node(&changes.node_index)?
                         .get_public_key();
+                    trace!("Base member leaf key: {:?}", public_key);
                     (verifier_artefacts, public_key)
                 };
 
@@ -254,6 +282,7 @@ impl KeyedValidator {
         postcard::from_bytes(value).map_err(|e| e.into())
     }
 
+    #[instrument(skip_all)]
     fn merge_changes_and_participate(
         &mut self,
         changes_id: ChangesID,
@@ -287,16 +316,38 @@ impl KeyedValidator {
         self.participant = Some(participant);
         self.changes.insert(changes_id, changes);
 
+        trace!("Resulted base stage key: {:?}", self.base_stk);
+        trace!("Resulted upstream stage key: {:?}", self.upstream_stk);
+        trace!("Resulted base ART: {:?}", self.base_art);
+        trace!("Resulted upstream ART: {:?}", self.upstream_art);
+        trace!("Resulted epoch: {}", self.epoch);
+
         Ok(branch_stk)
     }
 
+    #[instrument(skip_all)]
     fn merge_changes(&mut self, changes: &BranchChanges<CortadoAffine>) -> Result<StageKey> {
+
+        trace!("Initial base stage key: {:?}", self.base_stk);
+        trace!("Initial upstream stage key: {:?}", self.upstream_stk);
+        trace!("Initial base ART: {:?}", self.base_art);
+        trace!("Initial upstream ART: {:?}", self.upstream_art);
+        trace!("Initial epoch: {}", self.epoch);
+
+                trace!("Changes: {:?}", changes);
+
+
         // Should never panic
         let changes_id: ChangesID = Sha3_256::digest(changes.serialize()?).to_vec()[..8]
             .try_into()
             .unwrap();
 
+                trace!("ChangesID: {:?}", changes_id);
+
+
         if self.changes.contains_key(&changes_id) {
+                        trace!("Changes already applied");
+
             return Err(Error::InvalidInput);
         }
 
@@ -342,16 +393,36 @@ impl KeyedValidator {
 
         self.changes.insert(changes_id, changes.clone());
 
+        trace!("Resulted base stage key: {:?}", self.base_stk);
+        trace!("Resulted upstream stage key: {:?}", self.upstream_stk);
+        trace!("Resulted base ART: {:?}", self.base_art);
+        trace!("Resulted upstream ART: {:?}", self.upstream_art);
+        trace!("Resulted epoch: {}", self.epoch);
+
         Ok(branch_stk)
     }
 
+    #[instrument(skip_all)]
     fn apply_changes(&mut self, changes: &BranchChanges<CortadoAffine>) -> Result<StageKey> {
+
+        trace!("Initial base stage key: {:?}", self.base_stk);
+        trace!("Initial upstream stage key: {:?}", self.upstream_stk);
+        trace!("Initial base ART: {:?}", self.base_art);
+        trace!("Initial upstream ART: {:?}", self.upstream_art);
+        trace!("Initial epoch: {}", self.epoch);
+
+
+        trace!("Changes: {:?}", changes);
+
         // Should never panic
         let changes_id: ChangesID = Sha3_256::digest(changes.serialize()?).to_vec()[..8]
             .try_into()
             .unwrap();
 
+        trace!("ChangesID: {:?}", changes_id);
+
         if self.changes.contains_key(&changes_id) {
+            trace!("Changes already applied");
             return Err(Error::InvalidInput);
         }
 
@@ -359,6 +430,8 @@ impl KeyedValidator {
         let mut upstream_art = self.upstream_art.clone();
 
         let participant = if let Some(&secret_key) = self.participation_leafs.get(&changes_id) {
+            trace!("We initiate new epoch");
+            trace!("New leaf secret: {:?}", secret_key);
             upstream_art.update_key(&secret_key)?;
 
             let participant = Participant {
@@ -368,6 +441,7 @@ impl KeyedValidator {
             };
             Some(participant)
         } else {
+            trace!("Epoch initiated by another member");
             upstream_art.update_private_art(changes)?;
             None
         };
@@ -386,6 +460,13 @@ impl KeyedValidator {
         self.changes = HashMap::new();
         self.changes.insert(changes_id, changes.clone());
         self.epoch += 1;
+
+        trace!("Resulted base stage key: {:?}", self.base_stk);
+        trace!("Resulted upstream stage key: {:?}", self.upstream_stk);
+        trace!("Resulted base ART: {:?}", self.base_art);
+        trace!("Resulted upstream ART: {:?}", self.upstream_art);
+        trace!("Resulted epoch: {}", self.epoch);
+
 
         Ok(self.upstream_stk)
     }
