@@ -748,6 +748,7 @@ impl GroupContext {
 
         match operation {
             types::GroupOperation::AddMember { member_public_key } => {
+                trace!("GroupMembers count: {}", self.group_info.members().len());
                 if self.group_info.members().is_empty() {
                     let group_info = protected_payload
                         .protected_payload_tbs()
