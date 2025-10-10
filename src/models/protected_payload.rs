@@ -6,7 +6,7 @@ use sha3::Digest;
 use zrt_crypto::schnorr;
 
 use crate::{
-    error::{Error, Result},
+    errors::{Error, Result},
     models::payload::Payload,
     zero_art_proto,
 };

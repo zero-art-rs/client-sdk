@@ -56,7 +56,7 @@ pub enum Error {
     Forbidden,
 
     #[error("Changes already applied or merged")]
-    ChangesAlreadyApplied
+    ChangesAlreadyApplied,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

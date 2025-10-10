@@ -11,7 +11,7 @@ use uuid::Uuid;
 use zrt_zk::art::ARTProof;
 
 use crate::{
-    error::{Error, Result},
+    errors::{Error, Result},
     proof_system::get_proof_system,
     zero_art_proto,
 };

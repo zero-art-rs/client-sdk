@@ -1,11 +1,12 @@
 use crate::{
-    error::{Error, Result},
+    contexts::group::{GroupContext, Nonce},
+    core::impls::concurrent::linear_keyed_validator::LinearKeyedValidator,
+    errors::{Error, Result},
     models::{
         group_info::GroupInfo,
         invite::{Invite, Invitee, ProtectedInviteData},
     },
     utils::{decrypt, hkdf},
-    validator::{GroupContext, KeyedValidator, Nonce},
 };
 use ark_ec::{AffineRepr, CurveGroup};
 use chrono::Utc;
@@ -130,7 +131,7 @@ impl InviteContext {
         let base_art = PrivateART::from_public_art_and_secret(art, self.leaf_secret)?;
         Ok(GroupContext::from_parts(
             self.identity_secret_key,
-            KeyedValidator::new(base_art, self.stk, self.epoch),
+            LinearKeyedValidator::new(base_art, self.stk, self.epoch),
             GroupInfo::new(self.group_id, String::new(), Utc::now(), vec![]),
             0,
             Nonce::new(0),

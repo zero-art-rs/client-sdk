@@ -3,16 +3,14 @@ use serde::{Deserialize, Serialize};
 use sha3::Sha3_256;
 use zrt_art::{
     traits::{ARTPublicAPI, ARTPublicView},
-    types::{BranchChanges, LeafIter, PublicART},
+    types::{BranchChanges, PublicART},
 };
 
 use crate::{
-    core::{
-        traits::Validator,
-        types::{GroupOperation, ValidationResult},
-    },
-    error::{Error, Result},
+    core::{impls::group_owner_leaf_public_key, traits::Validator},
+    errors::{Error, Result},
     models::frame,
+    types::{GroupOperation, ValidationResult},
     utils::deserialize,
 };
 
@@ -163,6 +161,14 @@ impl Validator for LinearValidator {
         }
     }
 
+    fn tree_public_key(&self) -> CortadoAffine {
+        self.upstream_art.get_root().get_public_key()
+    }
+
+    fn tree(&self) -> &PublicART<CortadoAffine> {
+        &self.upstream_art
+    }
+
     fn epoch(&self) -> u64 {
         self.epoch
     }
@@ -215,11 +221,4 @@ impl LinearValidator {
 
         Ok(())
     }
-}
-
-fn group_owner_leaf_public_key<A: ARTPublicView<CortadoAffine>>(art: &A) -> CortadoAffine {
-    LeafIter::new(art.get_root())
-        .next()
-        .expect("ART can't be empty")
-        .get_public_key()
 }

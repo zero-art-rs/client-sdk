@@ -11,11 +11,11 @@ use zrt_art::types::BranchChanges;
 use zrt_crypto::x3dh::{x3dh_a, x3dh_b};
 
 use crate::{
-    core::types::ChangesID,
-    error::{Error, Result},
+    errors::{Error, Result},
+    types::{ChangesID, StageKey},
 };
 
-pub fn encrypt(stage_key: &[u8; 32], plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
+pub fn encrypt(stage_key: &StageKey, plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
     let h = Hkdf::<Sha3_256>::new(Some(b"encryption-key-derivation"), stage_key);
 
     // AES 256 key size - 32 bytes, nonce - 12 bytes
@@ -39,7 +39,7 @@ pub fn encrypt(stage_key: &[u8; 32], plaintext: &[u8], aad: &[u8]) -> Result<Vec
         .map_err(|_| Error::AesError)
 }
 
-pub fn decrypt(stage_key: &[u8; 32], ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
+pub fn decrypt(stage_key: &StageKey, ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
     let h = Hkdf::<Sha3_256>::new(Some(b"encryption-key-derivation"), stage_key);
 
     // AES 256 key size - 32 bytes, nonce - 12 bytes
@@ -125,7 +125,10 @@ pub fn derive_invite_key(leaf_key: ScalarField) -> Result<[u8; 32]> {
     hkdf(Some(b"invite-key-derivation"), &serialize(leaf_key)?)
 }
 
+pub fn derive_encryption_key(stage_key: &StageKey) -> Result<StageKey> {
+    hkdf(Some(b"encryption-key-derivation"), stage_key)
+}
+
 pub fn compute_changes_id(changes: &BranchChanges<CortadoAffine>) -> Result<ChangesID> {
     Ok(Sha3_256::digest(changes.serialize()?).to_vec()[..8].try_into()?)
 }
-// pub type StageKey = [u8; 32];

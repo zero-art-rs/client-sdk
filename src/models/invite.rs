@@ -1,5 +1,5 @@
 use crate::{
-    error::{Error, Result},
+    errors::{Error, Result},
     utils::{deserialize, serialize},
 };
 use ark_ec::{AffineRepr, CurveGroup};

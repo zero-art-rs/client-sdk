@@ -1,27 +1,42 @@
 use crate::{
-    core::types::{
-        AddMemberProposal, RemoveMemberProposal, UpdateKeyProposal, ValidationResult,
+    errors::Result,
+    models::frame::Frame,
+    types::{
+        AddMemberProposal, RemoveMemberProposal, StageKey, UpdateKeyProposal, ValidationResult,
         ValidationWithKeyResult,
     },
-    error::Result,
-    models::frame::Frame,
 };
 
 use cortado::{self, CortadoAffine, Fr as ScalarField};
+use zrt_art::types::PublicART;
 
 pub trait Validator {
     fn validate(&mut self, frame: &Frame) -> Result<ValidationResult>;
+
+    fn tree(&self) -> &PublicART<CortadoAffine>;
+    fn tree_public_key(&self) -> CortadoAffine;
     fn epoch(&self) -> u64;
 }
 
 pub trait KeyedValidator: Validator {
     fn validate_and_derive_key(&mut self, frame: &Frame) -> Result<ValidationWithKeyResult>;
     fn propose_add_member(&self, leaf_secret: ScalarField) -> Result<AddMemberProposal>;
-    fn propose_remove_member(&self, leaf: CortadoAffine, vanishing_secret_key: ScalarField) -> Result<RemoveMemberProposal>;
+    fn propose_remove_member(
+        &self,
+        leaf: CortadoAffine,
+        vanishing_secret_key: ScalarField,
+    ) -> Result<RemoveMemberProposal>;
     // TODO: Migrate to immutable ref
     fn propose_update_key(&mut self) -> Result<UpdateKeyProposal>;
+
     fn sign_with_tree_key(&self, message: &[u8]) -> Result<Vec<u8>>;
     fn sign_with_leaf_key(&self, message: &[u8]) -> Result<Vec<u8>>;
+
+    fn leaf_public_key(&self) -> CortadoAffine;
+
+    fn stage_key(&self) -> StageKey;
+    fn leaf_key(&self) -> ScalarField;
+    fn tree_key(&self) -> ScalarField;
 }
 
 pub trait Decompose {

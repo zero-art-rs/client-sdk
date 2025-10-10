@@ -1,7 +1,7 @@
 use prost::Message;
 
 use crate::{
-    error::{Error, Result},
+    errors::{Error, Result},
     models::group_info::{GroupInfo, User},
     zero_art_proto,
 };

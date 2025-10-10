@@ -1,5 +1,5 @@
 use crate::{
-    error::{Error, Result},
+    errors::{Error, Result},
     utils::{deserialize, serialize},
     zero_art_proto,
 };
@@ -218,13 +218,13 @@ pub struct User {
 }
 
 impl User {
-    pub fn new(name: String, public_key: CortadoAffine, metadata: Vec<u8>, role: Role) -> Self {
+    pub fn new(name: String, public_key: CortadoAffine, metadata: Vec<u8>) -> Self {
         Self {
             id: public_key_to_id(public_key),
             name,
             public_key,
             metadata,
-            role,
+            role: Role::default(),
         }
     }
 
@@ -233,14 +233,13 @@ impl User {
         name: String,
         public_key: CortadoAffine,
         metadata: Vec<u8>,
-        role: Role,
     ) -> Self {
         Self {
             id,
             name,
             public_key,
             metadata,
-            role,
+            role: Role::default(),
         }
     }
 
