@@ -10,7 +10,7 @@ use sha3::{Digest, Sha3_256};
 use zrt_art::types::BranchChanges;
 use zrt_crypto::x3dh::{x3dh_a, x3dh_b};
 
-use crate::error::{Error, Result};
+use crate::{core::types::ChangesID, error::{Error, Result}};
 
 pub fn encrypt(stage_key: &[u8; 32], plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
     let h = Hkdf::<Sha3_256>::new(Some(b"encryption-key-derivation"), stage_key);
@@ -99,7 +99,8 @@ pub fn hkdf(salt: Option<&[u8]>, ikm: &[u8]) -> Result<[u8; 32]> {
     Ok(okm)
 }
 
-pub fn derive_stage_key(stage_key: &StageKey, tree_key: ScalarField) -> Result<StageKey> {
+#[allow(clippy::useless_vec)]
+pub fn derive_stage_key(stage_key: &[u8; 32], tree_key: ScalarField) -> Result<[u8; 32]> {
     // Derive stage key: stk(i+1) = HKDF( "stage-key-derivation", stk(i) || tk(i+1) )
     let stk = hkdf(
         Some(b"stage-key-derivation"),
@@ -108,7 +109,8 @@ pub fn derive_stage_key(stage_key: &StageKey, tree_key: ScalarField) -> Result<S
     Ok(stk)
 }
 
-pub fn derive_leaf_key(stage_key: &StageKey, leaf_key: ScalarField) -> Result<ScalarField> {
+#[allow(clippy::useless_vec)]
+pub fn derive_leaf_key(stage_key: &[u8; 32], leaf_key: ScalarField) -> Result<ScalarField> {
     // Derive leaf secret: leaf_key(i+1) = HKDF( "leaf-key-derivation", stk(i) || leaf_key(i) )
     Ok(ScalarField::from_le_bytes_mod_order(&hkdf(
         Some(b"leaf-key-derivation"),
@@ -116,14 +118,11 @@ pub fn derive_leaf_key(stage_key: &StageKey, leaf_key: ScalarField) -> Result<Sc
     )?))
 }
 
-pub fn derive_invite_key(leaf_key: ScalarField) -> Result<StageKey> {
+pub fn derive_invite_key(leaf_key: ScalarField) -> Result<[u8; 32]> {
     hkdf(Some(b"invite-key-derivation"), &serialize(leaf_key)?)
 }
-
-pub type ChangesID = [u8; 8];
 
 pub fn compute_changes_id(changes: &BranchChanges<CortadoAffine>) -> Result<ChangesID> {
     Ok(Sha3_256::digest(changes.serialize()?).to_vec()[..8].try_into()?)
 }
-
-pub type StageKey = [u8; 32];
+// pub type StageKey = [u8; 32];

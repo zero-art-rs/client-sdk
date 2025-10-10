@@ -17,8 +17,8 @@ use once_cell::sync::OnceCell;
 
 static PROOF_SYSTEM: OnceCell<ProofSystem> = OnceCell::new();
 
-pub fn set_proof_system(ps: ProofSystem) -> Result<(), ProofSystem> {
-    PROOF_SYSTEM.set(ps)
+pub fn set_proof_system(ps: ProofSystem) {
+    let _ = PROOF_SYSTEM.set(ps);
 }
 
 pub fn get_proof_system() -> &'static ProofSystem {

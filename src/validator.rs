@@ -11,244 +11,21 @@ use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use zrt_art::{
     traits::{ARTPrivateAPI, ARTPublicAPI, ARTPublicView},
-    types::{BranchChanges, LeafIter, LeafStatus, PrivateART, PublicART},
+    types::{BranchChanges, LeafIter, LeafStatus, PrivateART},
 };
 
 use crate::{
-    bounded_map::BoundedMap,
-    error::{Error, Result},
-    models::{
+    bounded_map::BoundedMap, core::types::{self, ChangesID, StageKey}, error::{Error, Result}, models::{
         frame::{Frame, FrameTbs, GroupOperation, Proof},
-        group_info::{GroupInfo, Role, User, public_key_to_id},
+        group_info::{public_key_to_id, GroupInfo, Role, User},
         invite::{Invite, InviteTbs, Invitee, ProtectedInviteData},
         payload::{GroupActionPayload, Payload},
         protected_payload::{ProtectedPayload, ProtectedPayloadTbs, Sender},
-    },
-    proof_system::get_proof_system,
-    utils::{
-        ChangesID, StageKey, compute_changes_id, decrypt, derive_invite_key, derive_leaf_key,
+    }, proof_system::get_proof_system, utils::{
+         compute_changes_id, decrypt, derive_invite_key, derive_leaf_key,
         derive_stage_key, deserialize, encrypt, serialize,
-    },
+    }
 };
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Validator {
-    base_art: PublicART<CortadoAffine>,
-    upstream_art: PublicART<CortadoAffine>,
-    changes: Vec<BranchChanges<CortadoAffine>>,
-    closed: bool,
-    epoch: u64,
-}
-
-impl Validator {
-    pub fn new(base_art: PublicART<CortadoAffine>, epoch: u64) -> Self {
-        Self {
-            upstream_art: base_art.clone(),
-            base_art,
-            changes: vec![],
-            closed: true,
-            epoch,
-        }
-    }
-
-    pub fn validate(&mut self, frame: &Frame) -> Result<Option<ARTOperation>> {
-        let frame_epoch = frame.frame_tbs().epoch();
-
-        if frame_epoch != self.epoch && frame_epoch != self.epoch + 1 {
-            return Err(Error::InvalidEpoch);
-        }
-
-        let is_next_epoch = frame_epoch == self.epoch + 1;
-
-        // If frame don't have group operation then it is just payload frame that should have current epoch
-        if frame.frame_tbs().group_operation().is_none() && !is_next_epoch {
-            frame.verify_schnorr::<Sha3_256>(self.upstream_art.get_root().get_public_key())?;
-            return Ok(None);
-        }
-
-        let group_operation = frame
-            .frame_tbs()
-            .group_operation()
-            .ok_or(Error::InvalidEpoch)?;
-
-        match group_operation {
-            GroupOperation::AddMember(changes) => {
-                if !is_next_epoch && self.closed {
-                    return Err(Error::InvalidEpoch);
-                }
-
-                let (verifier_artefacts, public_key) = if is_next_epoch {
-                    let verifier_artefacts = self
-                        .upstream_art
-                        .compute_artefacts_for_verification(changes)?;
-                    let public_key = group_owner_leaf_public_key(&self.upstream_art);
-                    (verifier_artefacts, public_key)
-                } else {
-                    let verifier_artefacts =
-                        self.base_art.compute_artefacts_for_verification(changes)?;
-                    let public_key = group_owner_leaf_public_key(&self.base_art);
-                    (verifier_artefacts, public_key)
-                };
-
-                frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
-                let operation = ARTOperation::AddMember {
-                    member_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
-                };
-
-                self.apply_changes(changes, is_next_epoch)?;
-
-                self.closed = true;
-
-                Ok(Some(operation))
-            }
-            GroupOperation::KeyUpdate(changes) => {
-                if !is_next_epoch && self.closed {
-                    return Err(Error::InvalidEpoch);
-                }
-
-                let (verifier_artefacts, public_key) = if is_next_epoch {
-                    let verifier_artefacts = self
-                        .upstream_art
-                        .compute_artefacts_for_verification(changes)?;
-                    let public_key = self
-                        .upstream_art
-                        .get_node(&changes.node_index)?
-                        .get_public_key();
-                    (verifier_artefacts, public_key)
-                } else {
-                    let verifier_artefacts =
-                        self.base_art.compute_artefacts_for_verification(changes)?;
-                    let public_key = self
-                        .base_art
-                        .get_node(&changes.node_index)?
-                        .get_public_key();
-                    (verifier_artefacts, public_key)
-                };
-
-                frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
-                let operation = ARTOperation::KeyUpdate {
-                    old_public_key: public_key,
-                    new_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
-                };
-
-                self.apply_changes(changes, is_next_epoch)?;
-
-                self.closed = false;
-
-                Ok(Some(operation))
-            }
-            GroupOperation::RemoveMember(changes) => {
-                if !is_next_epoch && self.closed {
-                    return Err(Error::InvalidEpoch);
-                }
-
-                let (verifier_artefacts, public_key) = if is_next_epoch {
-                    let verifier_artefacts = self
-                        .upstream_art
-                        .compute_artefacts_for_verification(changes)?;
-                    let public_key = group_owner_leaf_public_key(&self.upstream_art);
-                    (verifier_artefacts, public_key)
-                } else {
-                    let verifier_artefacts =
-                        self.base_art.compute_artefacts_for_verification(changes)?;
-                    let public_key = group_owner_leaf_public_key(&self.base_art);
-                    (verifier_artefacts, public_key)
-                };
-
-                frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
-                let operation = ARTOperation::RemoveMember {
-                    member_public_key: public_key,
-                };
-
-                self.apply_changes(changes, is_next_epoch)?;
-
-                self.closed = false;
-
-                Ok(Some(operation))
-            }
-            GroupOperation::Init(_) => {
-                if frame_epoch != 0 {
-                    return Err(Error::InvalidEpoch);
-                }
-
-                let owner_public_key: CortadoAffine = deserialize(frame.frame_tbs().nonce())?;
-                frame.verify_schnorr::<Sha3_256>(owner_public_key)?;
-                Ok(Some(ARTOperation::Init))
-            }
-            GroupOperation::LeaveGroup(node_index) => {
-                if is_next_epoch {
-                    return Err(Error::InvalidEpoch);
-                }
-
-                let public_key = self.upstream_art.get_node(node_index)?.get_public_key();
-                frame.verify_schnorr::<Sha3_256>(public_key)?;
-                Ok(Some(ARTOperation::LeaveGroup))
-            }
-            GroupOperation::DropGroup(_) => unimplemented!(),
-        }
-    }
-
-    pub fn serialize(&self) -> Result<Vec<u8>> {
-        postcard::to_allocvec(&self).map_err(|e| e.into())
-    }
-
-    pub fn deserialize(value: &[u8]) -> Result<Self> {
-        postcard::from_bytes(value).map_err(|e| e.into())
-    }
-
-    fn apply_changes(
-        &mut self,
-        changes: &BranchChanges<CortadoAffine>,
-        is_next_epoch: bool,
-    ) -> Result<()> {
-        if !is_next_epoch {
-            let mut upstream_art = self.base_art.clone();
-            upstream_art.merge_all(&vec![self.changes.clone(), vec![changes.clone()]].concat())?;
-
-            self.upstream_art = upstream_art;
-
-            self.changes.push(changes.clone());
-
-            return Ok(());
-        }
-
-        let base_art = self.upstream_art.clone();
-        let mut upstream_art = self.upstream_art.clone();
-        upstream_art.update_public_art(changes)?;
-
-        self.base_art = base_art;
-        self.upstream_art = upstream_art;
-
-        self.changes = vec![changes.clone()];
-
-        Ok(())
-    }
-}
-
-fn group_owner_leaf_public_key<A: ARTPublicView<CortadoAffine>>(art: &A) -> CortadoAffine {
-    LeafIter::new(art.get_root())
-        .next()
-        .expect("ART can't be empty")
-        .get_public_key()
-}
-
-#[derive(Debug)]
-pub enum ARTOperation {
-    Init,
-    LeaveGroup,
-    DropGroup,
-    AddMember {
-        member_public_key: CortadoAffine,
-    },
-    KeyUpdate {
-        old_public_key: CortadoAffine,
-        new_public_key: CortadoAffine,
-    },
-    RemoveMember {
-        member_public_key: CortadoAffine,
-    },
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Participant {
     id: ChangesID,
@@ -296,7 +73,7 @@ impl KeyedValidator {
         &mut self,
         frame: &Frame,
     ) -> Result<(
-        Option<ARTOperation>,
+        Option<types::GroupOperation<CortadoAffine>>,
         impl Fn(&[u8], &[u8]) -> Result<Vec<u8>> + 'static,
     )> {
         let frame_epoch = frame.frame_tbs().epoch();
@@ -348,7 +125,7 @@ impl KeyedValidator {
                 };
 
                 frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
-                let operation = ARTOperation::AddMember {
+                let operation = types::GroupOperation::AddMember {
                     member_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
 
@@ -378,7 +155,7 @@ impl KeyedValidator {
                 };
 
                 frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
-                let operation = ARTOperation::KeyUpdate {
+                let operation = types::GroupOperation::KeyUpdate {
                     old_public_key: public_key,
                     new_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
@@ -432,7 +209,7 @@ impl KeyedValidator {
                 };
 
                 frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
-                let operation = ARTOperation::RemoveMember {
+                let operation = types::GroupOperation::RemoveMember {
                     member_public_key: public_key,
                 };
 
@@ -451,7 +228,7 @@ impl KeyedValidator {
 
                 let owner_public_key: CortadoAffine = deserialize(frame.frame_tbs().nonce())?;
                 frame.verify_schnorr::<Sha3_256>(owner_public_key)?;
-                Ok((Some(ARTOperation::Init), decrypt_factory(self.upstream_stk)))
+                Ok((Some(types::GroupOperation::Init), decrypt_factory(self.upstream_stk)))
             }
             GroupOperation::LeaveGroup(node_index) => {
                 if is_next_epoch {
@@ -461,7 +238,7 @@ impl KeyedValidator {
                 let public_key = self.upstream_art.get_node(node_index)?.get_public_key();
                 frame.verify_schnorr::<Sha3_256>(public_key)?;
                 Ok((
-                    Some(ARTOperation::LeaveGroup),
+                    Some(types::GroupOperation::LeaveGroup),
                     decrypt_factory(self.upstream_stk),
                 ))
             }
@@ -818,7 +595,7 @@ impl GroupContext {
             Self {
                 identity_secret_key,
                 validator: Mutex::new(KeyedValidator::new(base_art, base_stk, 0)),
-                group_info: group_info,
+                group_info,
                 seq_num: 0,
                 nonce: Nonce(0),
             },
@@ -872,7 +649,7 @@ impl GroupContext {
         )?)?;
 
         match operation.unwrap() {
-            ARTOperation::AddMember { member_public_key } => {
+            types::GroupOperation::AddMember { member_public_key } => {
                 if self.group_info.members().is_empty() {
                     let group_info = protected_payload
                         .protected_payload_tbs()
@@ -912,7 +689,7 @@ impl GroupContext {
                     .members_mut()
                     .insert(member_public_key, member);
             }
-            ARTOperation::KeyUpdate {
+            types::GroupOperation::KeyUpdate {
                 old_public_key,
                 new_public_key,
             } => {
@@ -955,7 +732,7 @@ impl GroupContext {
                     .members_mut()
                     .update_leaf(old_public_key, new_public_key);
             }
-            ARTOperation::RemoveMember { member_public_key } => {
+            types::GroupOperation::RemoveMember { member_public_key } => {
                 let sender_public_key = match protected_payload.protected_payload_tbs().sender() {
                     Sender::UserId(user_id) => self
                         .group_info
@@ -1249,6 +1026,13 @@ impl GroupContext {
         let tk_public_key = (CortadoAffine::generator() * tk.key).into_affine();
         Ok(schnorr::sign(&vec![tk.key], &vec![tk_public_key], msg)?)
     }
+}
+
+fn group_owner_leaf_public_key<A: ARTPublicView<CortadoAffine>>(art: &A) -> CortadoAffine {
+    LeafIter::new(art.get_root())
+        .next()
+        .expect("ART can't be empty")
+        .get_public_key()
 }
 
 #[cfg(test)]
