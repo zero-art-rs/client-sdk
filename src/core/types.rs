@@ -39,4 +39,3 @@ pub type ValidationWithKeyResult = (Option<GroupOperation<CortadoAffine>>, Stage
 
 pub type StageKey = [u8; 32];
 pub type ChangesID = [u8; 8];
-

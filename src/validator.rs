@@ -3,8 +3,8 @@ use ark_ff::UniformRand;
 use ark_std::rand::thread_rng;
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
-use tracing::{instrument, span, trace, Level};
 use std::{collections::HashMap, sync::Mutex};
+use tracing::{Level, instrument, span, trace};
 use zrt_crypto::schnorr;
 use zrt_zk::art::ARTProof;
 
@@ -16,16 +16,21 @@ use zrt_art::{
 };
 
 use crate::{
-    bounded_map::BoundedMap, core::types::{self, ChangesID, StageKey}, error::{Error, Result}, models::{
+    bounded_map::BoundedMap,
+    core::types::{self, ChangesID, StageKey},
+    error::{Error, Result},
+    models::{
         frame::{Frame, FrameTbs, GroupOperation, Proof},
-        group_info::{public_key_to_id, GroupInfo, Role, User},
+        group_info::{GroupInfo, Role, User, public_key_to_id},
         invite::{Invite, InviteTbs, Invitee, ProtectedInviteData},
         payload::{GroupActionPayload, Payload},
         protected_payload::{ProtectedPayload, ProtectedPayloadTbs, Sender},
-    }, proof_system::get_proof_system, utils::{
-         compute_changes_id, decrypt, derive_invite_key, derive_leaf_key,
-        derive_stage_key, deserialize, encrypt, serialize,
-    }
+    },
+    proof_system::get_proof_system,
+    utils::{
+        compute_changes_id, decrypt, derive_invite_key, derive_leaf_key, derive_stage_key,
+        deserialize, encrypt, serialize,
+    },
 };
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Participant {
@@ -97,7 +102,10 @@ impl KeyedValidator {
             let span = span!(Level::TRACE, "Payload frame");
             let _enter = span.enter();
 
-            trace!("Upstream root public key: {:?}", self.upstream_art.get_root().get_public_key());
+            trace!(
+                "Upstream root public key: {:?}",
+                self.upstream_art.get_root().get_public_key()
+            );
             frame.verify_schnorr::<Sha3_256>(self.upstream_art.get_root().get_public_key())?;
             trace!("Upstream stage key: {:?}", self.upstream_stk);
             return Ok((None, decrypt_factory(self.upstream_stk)));
@@ -108,7 +116,6 @@ impl KeyedValidator {
             Some(GroupOperation::Init(_))
         ) && frame_epoch != 0
         {
-
             return Err(Error::InvalidEpoch);
         }
 
@@ -132,7 +139,10 @@ impl KeyedValidator {
                     let verifier_artefacts = self
                         .upstream_art
                         .compute_artefacts_for_verification(changes)?;
-                    trace!("Verifier artefacts based on upstream: {:?}", verifier_artefacts);
+                    trace!(
+                        "Verifier artefacts based on upstream: {:?}",
+                        verifier_artefacts
+                    );
                     let public_key = group_owner_leaf_public_key(&self.upstream_art);
                     trace!("Upstream owner leaf key: {:?}", public_key);
                     (verifier_artefacts, public_key)
@@ -163,7 +173,10 @@ impl KeyedValidator {
                     let verifier_artefacts = self
                         .upstream_art
                         .compute_artefacts_for_verification(changes)?;
-                    trace!("Verifier artefacts based on upstream: {:?}", verifier_artefacts);
+                    trace!(
+                        "Verifier artefacts based on upstream: {:?}",
+                        verifier_artefacts
+                    );
                     let public_key = self
                         .upstream_art
                         .get_node(&changes.node_index)?
@@ -256,7 +269,10 @@ impl KeyedValidator {
 
                 let owner_public_key: CortadoAffine = deserialize(frame.frame_tbs().nonce())?;
                 frame.verify_schnorr::<Sha3_256>(owner_public_key)?;
-                Ok((Some(types::GroupOperation::Init), decrypt_factory(self.upstream_stk)))
+                Ok((
+                    Some(types::GroupOperation::Init),
+                    decrypt_factory(self.upstream_stk),
+                ))
             }
             GroupOperation::LeaveGroup(node_index) => {
                 if is_next_epoch {
@@ -327,26 +343,23 @@ impl KeyedValidator {
 
     #[instrument(skip_all)]
     fn merge_changes(&mut self, changes: &BranchChanges<CortadoAffine>) -> Result<StageKey> {
-
         trace!("Initial base stage key: {:?}", self.base_stk);
         trace!("Initial upstream stage key: {:?}", self.upstream_stk);
         trace!("Initial base ART: {:?}", self.base_art);
         trace!("Initial upstream ART: {:?}", self.upstream_art);
         trace!("Initial epoch: {}", self.epoch);
 
-                trace!("Changes: {:?}", changes);
-
+        trace!("Changes: {:?}", changes);
 
         // Should never panic
         let changes_id: ChangesID = Sha3_256::digest(changes.serialize()?).to_vec()[..8]
             .try_into()
             .unwrap();
 
-                trace!("ChangesID: {:?}", changes_id);
-
+        trace!("ChangesID: {:?}", changes_id);
 
         if self.changes.contains_key(&changes_id) {
-                        trace!("Changes already applied");
+            trace!("Changes already applied");
 
             return Err(Error::InvalidInput);
         }
@@ -404,13 +417,11 @@ impl KeyedValidator {
 
     #[instrument(skip_all)]
     fn apply_changes(&mut self, changes: &BranchChanges<CortadoAffine>) -> Result<StageKey> {
-
         trace!("Initial base stage key: {:?}", self.base_stk);
         trace!("Initial upstream stage key: {:?}", self.upstream_stk);
         trace!("Initial base ART: {:?}", self.base_art);
         trace!("Initial upstream ART: {:?}", self.upstream_art);
         trace!("Initial epoch: {}", self.epoch);
-
 
         trace!("Changes: {:?}", changes);
 
@@ -466,7 +477,6 @@ impl KeyedValidator {
         trace!("Resulted base ART: {:?}", self.base_art);
         trace!("Resulted upstream ART: {:?}", self.upstream_art);
         trace!("Resulted epoch: {}", self.epoch);
-
 
         Ok(self.upstream_stk)
     }
@@ -729,7 +739,14 @@ impl GroupContext {
             &frame.frame_tbs().associated_data::<Sha3_256>()?,
         )?)?;
 
-        match operation.unwrap() {
+        let Some(operation) = operation else {
+            return Ok(protected_payload
+                .protected_payload_tbs()
+                .payloads()
+                .to_vec());
+        };
+
+        match operation {
             types::GroupOperation::AddMember { member_public_key } => {
                 if self.group_info.members().is_empty() {
                     let group_info = protected_payload
@@ -984,8 +1001,13 @@ impl GroupContext {
 
         // Predict add member changes
         let frame = if validator.is_participant() {
-            let mut frame_tbs =
-                FrameTbs::new(self.group_info.id(), validator.epoch(), self.nonce.next(), None, vec![]);
+            let mut frame_tbs = FrameTbs::new(
+                self.group_info.id(),
+                validator.epoch(),
+                self.nonce.next(),
+                None,
+                vec![],
+            );
 
             let encrypted_protected_payload = validator.encrypt(
                 &protected_payload.encode_to_vec(),

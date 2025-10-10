@@ -10,7 +10,10 @@ use sha3::{Digest, Sha3_256};
 use zrt_art::types::BranchChanges;
 use zrt_crypto::x3dh::{x3dh_a, x3dh_b};
 
-use crate::{core::types::ChangesID, error::{Error, Result}};
+use crate::{
+    core::types::ChangesID,
+    error::{Error, Result},
+};
 
 pub fn encrypt(stage_key: &[u8; 32], plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
     let h = Hkdf::<Sha3_256>::new(Some(b"encryption-key-derivation"), stage_key);

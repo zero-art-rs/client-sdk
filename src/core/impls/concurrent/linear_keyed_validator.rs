@@ -3,9 +3,14 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use zrt_art::types::{BranchChanges, PrivateART};
 
-use crate::{bounded_map::BoundedMap, core::{traits::KeyedValidator, types::{ChangesID, StageKey}}};
+use crate::{
+    bounded_map::BoundedMap,
+    core::{
+        traits::KeyedValidator,
+        types::{ChangesID, StageKey},
+    },
+};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
-
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Participant {
@@ -517,4 +522,3 @@ pub struct LinearKeyedValidator {
 //         self.participant.is_some()
 //     }
 // }
-
