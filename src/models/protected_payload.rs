@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use prost::Message;
 use sha3::Digest;
+use tracing::{instrument, trace};
 use zrt_crypto::schnorr;
 
 use crate::{
@@ -35,11 +36,14 @@ impl ProtectedPayload {
     }
 
     // Verify signature
+    #[instrument]
     pub fn verify<D: Digest>(&self, public_key: CortadoAffine) -> Result<()> {
+        let msg = D::digest(self.protected_payload_tbs.encode_to_vec());
+        trace!("Msg: {:?}", D::digest(self.protected_payload_tbs.encode_to_vec()));
         Ok(schnorr::verify(
             &self.signature,
             &vec![public_key],
-            &D::digest(self.protected_payload_tbs.encode_to_vec()),
+            &msg,
         )?)
     }
 
@@ -121,12 +125,15 @@ impl ProtectedPayloadTbs {
     }
 
     // Sign payload and return ProtectedPayload
+    #[instrument]
     pub fn sign<D: Digest>(self, secret_key: ScalarField) -> Result<ProtectedPayload> {
         let public_key = (CortadoAffine::generator() * secret_key).into_affine();
+        let msg = D::digest(self.encode_to_vec());
+        trace!("Msg: {:?}", msg); 
         let signature = schnorr::sign(
             &vec![secret_key],
             &vec![public_key],
-            &D::digest(self.encode_to_vec()),
+            &msg,
         )?;
         Ok(ProtectedPayload {
             protected_payload_tbs: self,

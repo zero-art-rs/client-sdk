@@ -4,12 +4,12 @@ use ark_std::rand::thread_rng;
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use std::sync::Mutex;
-use tracing::trace;
+use tracing::{instrument, trace};
 use zrt_crypto::schnorr;
 
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
-use zrt_art::types::PrivateART;
+use zrt_art::types::{PrivateART, PublicART};
 
 use crate::{
     core::{
@@ -74,14 +74,17 @@ impl GroupContext {
             .members_mut()
             .insert((CortadoAffine::generator() * leaf_secret).into(), user);
 
-        let frame = FrameTbs::new(
+        let mut frame_tbs = FrameTbs::new(
             group_info.id(),
             0,
             serialize((CortadoAffine::generator() * identity_secret_key).into_affine())?,
             Some(GroupOperation::Init(base_art.clone().into())),
             vec![],
-        )
-        .prove_schnorr::<Sha3_256>(identity_secret_key)?;
+        );
+        let protected_payload = encrypt(&base_stk, &ProtectedPayload::default().encode_to_vec(), &frame_tbs.associated_data::<Sha3_256>()?)?;
+        frame_tbs.set_protected_payload(protected_payload);
+
+        let frame = frame_tbs.prove_schnorr::<Sha3_256>(identity_secret_key)?;
 
         Ok((
             Self {
@@ -131,6 +134,7 @@ impl GroupContext {
         }
     }
 
+    #[instrument(skip_all)]
     pub fn process_frame(&mut self, frame: Frame) -> Result<Vec<Payload>> {
         let mut validator = self.validator.lock().unwrap();
         let (operation, stage_key) = validator.validate_and_derive_key(&frame)?;
@@ -150,7 +154,6 @@ impl GroupContext {
 
         match operation {
             types::GroupOperation::AddMember { member_public_key } => {
-                trace!("GroupMembers count: {}", self.group_info.members().len());
                 if self.group_info.members().is_empty() {
                     let group_info = protected_payload
                         .protected_payload_tbs()
@@ -177,7 +180,13 @@ impl GroupContext {
                         .public_key(),
                     Sender::LeafId(_) => unimplemented!(),
                 };
+
+
+                trace!("Sender public key: {:?}", sender_public_key);
+                trace!("Signature: {:?}", protected_payload.signature());
+                trace!("Payload: {:?}", protected_payload);
                 protected_payload.verify::<Sha3_256>(sender_public_key)?;
+                trace!("Verified");
 
                 let member = User::new_with_id(
                     public_key_to_id(member_public_key),
@@ -257,6 +266,7 @@ impl GroupContext {
             .to_vec())
     }
 
+    #[instrument(skip_all)]
     pub fn add_member(
         &mut self,
         invitee: Invitee,
@@ -297,6 +307,11 @@ impl GroupContext {
             vec![],
         );
 
+        protected_payload.verify::<Sha3_256>(self.identity_public_key()).unwrap();
+        trace!("Valid with: {:?}", self.identity_public_key());
+        trace!("Signature: {:?}", protected_payload.signature());
+        trace!("Payload: {:?}", protected_payload);
+
         // Encryption
         let encrypted_protected_payload = encrypt(
             &proposal.stage_key,
@@ -335,6 +350,7 @@ impl GroupContext {
         Ok((frame, invite))
     }
 
+    #[instrument(skip_all)]
     pub fn remove_member(&mut self, user_id: &str, mut payloads: Vec<Payload>) -> Result<Frame> {
         let validator = self.validator.lock().unwrap();
 
@@ -397,6 +413,7 @@ impl GroupContext {
         Ok(frame)
     }
 
+    #[instrument(skip_all)]
     pub fn create_frame(&mut self, payloads: Vec<Payload>) -> Result<Frame> {
         let mut validator = self.validator.lock().unwrap();
 
@@ -458,6 +475,7 @@ impl GroupContext {
         Ok(frame)
     }
 
+    #[instrument(skip_all)]
     pub fn join_group_as(&mut self, user: User) -> Result<Frame> {
         let mut validator = self.validator.lock().unwrap();
 
@@ -546,5 +564,9 @@ impl GroupContext {
             &vec![validator.tree_public_key()],
             msg,
         )?)
+    }
+
+    pub fn tree(&self) -> PublicART<CortadoAffine> {
+        self.validator.lock().unwrap().tree().clone()
     }
 }
