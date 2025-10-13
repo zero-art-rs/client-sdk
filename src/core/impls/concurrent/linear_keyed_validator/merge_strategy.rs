@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, iter::once};
 
 use crate::{
     core::impls::concurrent::linear_keyed_validator::{LinearKeyedValidator, Participant},
@@ -18,7 +18,6 @@ impl LinearKeyedValidator {
         changes: BranchChanges<CortadoAffine>,
         secret_key: ScalarField,
     ) -> Result<StageKey> {
-
         let mut upstream_art = self.base_art.clone();
         let (tree_key, _, _) = upstream_art.update_key(&secret_key)?;
         let branch_stk = derive_stage_key(&self.base_stk, tree_key.key)?;
@@ -115,7 +114,7 @@ impl LinearKeyedValidator {
         } else {
             let mut upstream_art = self.base_art.clone();
             upstream_art
-                .merge_for_observer(&self.changes.clone().into_values().collect::<Vec<_>>())?;
+                .merge_for_observer(&self.changes.clone().into_values().chain(once(changes.clone())).collect::<Vec<_>>())?;
 
             upstream_art
         };
@@ -151,11 +150,11 @@ impl LinearKeyedValidator {
         trace!("Initial base ART: {:?}", self.base_art);
         trace!("Initial upstream ART: {:?}", self.upstream_art);
         trace!("Initial epoch: {}", self.epoch);
-        
+
         // Should never panic
         let changes_id: ChangesID = Sha3_256::digest(changes.serialize()?).to_vec()[..8]
-        .try_into()
-        .unwrap();
+            .try_into()
+            .unwrap();
 
         debug!("Changes ID: {:?}", changes_id);
 

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ark_ec::{AffineRepr, CurveGroup};
 use serde::{Deserialize, Serialize};
 use sha3::Sha3_256;
-use tracing::{instrument, span, trace, Level};
+use tracing::{debug, instrument, span, trace, Level};
 use zrt_art::{
     traits::{ARTPrivateAPI, ARTPublicAPI, ARTPublicView},
     types::{BranchChanges, LeafStatus, PrivateART, PublicART},
@@ -74,22 +74,22 @@ impl KeyedValidator for LinearKeyedValidator {
     #[instrument(skip_all)]
     fn validate_and_derive_key(&mut self, frame: &frame::Frame) -> Result<ValidationWithKeyResult> {
         trace!("Frame: {:?}", frame);
-        
-        trace!("Validator epoch: {}", self.epoch);
+
+        debug!("Validator epoch: {}", self.epoch);
         let frame_epoch = frame.frame_tbs().epoch();
-        trace!("Frame epoch: {frame_epoch}");
+        debug!("Frame epoch: {frame_epoch}");
 
         if frame_epoch != self.epoch && frame_epoch != self.epoch + 1 {
             return Err(Error::InvalidEpoch);
         }
 
         let is_next_epoch = frame_epoch == self.epoch + 1;
-        trace!("Is next epoch: {is_next_epoch}");
+        debug!("Is next epoch: {is_next_epoch}");
 
         // If frame don't have group operation then it is just payload frame that should have current epoch
         trace!("Group operation: {:?}", frame.frame_tbs().group_operation());
         if frame.frame_tbs().group_operation().is_none() && !is_next_epoch {
-            let span = span!(Level::TRACE, "Payload frame");
+            let span = span!(Level::TRACE, "payload_frame");
             let _enter = span.enter();
 
             trace!(
@@ -116,7 +116,7 @@ impl KeyedValidator for LinearKeyedValidator {
 
         match group_operation {
             frame::GroupOperation::AddMember(changes) => {
-                let span = span!(Level::TRACE, "Add member frame");
+                let span = span!(Level::TRACE, "add_member_frame");
                 let _enter = span.enter();
 
                 trace!("Changes: {:?}", changes);
@@ -142,7 +142,7 @@ impl KeyedValidator for LinearKeyedValidator {
                 };
 
                 frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
-                
+
                 let operation = GroupOperation::AddMember {
                     member_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
@@ -150,13 +150,10 @@ impl KeyedValidator for LinearKeyedValidator {
                     return Ok((Some(operation), self.upstream_stk));
                 }
 
-                Ok((
-                    Some(operation),
-                    self.apply_changes(changes)?,
-                ))
+                Ok((Some(operation), self.apply_changes(changes)?))
             }
             frame::GroupOperation::KeyUpdate(changes) => {
-                let span = span!(Level::TRACE, "Key update frame");
+                let span = span!(Level::TRACE, "key_update_frame");
                 let _enter = span.enter();
 
                 let (verifier_artefacts, public_key) = if is_next_epoch {

@@ -2,8 +2,14 @@ use ark_ff::UniformRand;
 use ark_std::rand::{SeedableRng, rngs::StdRng};
 use sha3::Digest;
 use uuid::Uuid;
+use zrt_art::types::LeafIter;
 
-use crate::{models::frame, proof_system::get_proof_system, types::StageKey, utils::encrypt};
+use crate::{
+    models::frame,
+    proof_system::get_proof_system,
+    types::{Proposal, StageKey},
+    utils::encrypt,
+};
 
 use super::*;
 
@@ -22,8 +28,388 @@ impl Nonce {
     }
 }
 
+// Тест кейси:
+// Овнер додає учасників і обробляє власні ж фрейми послідовно
+// Овнер додає учасників, але пробує додати наступного не обробивши попереднього
+// Овнер оновлює ключ послідовно
+// Овнер додає учасника який приймає запрошення і оновлює ключ
+// Конкурентне оновлення ключів
+// Видалення учасника + фіналізація видалень
+
+fn frame_from_proposal(
+    proposal: Proposal<CortadoAffine>,
+    epoch: u64,
+    payload: &[u8],
+) -> frame::Frame {
+    let frame_tbs = frame::FrameTbs::new(
+        Uuid::new_v4(),
+        epoch,
+        vec![],
+        Some(proposal.changes.into()),
+        encrypt(&proposal.stage_key, payload, b"").expect("Failed to encrypt payload"),
+    );
+    let frame_aad = Sha3_256::digest(
+        frame_tbs
+            .encode_to_vec()
+            .expect("Failed to encode frame tbs"),
+    );
+    frame::Frame::new(
+        frame_tbs,
+        frame::Proof::ArtProof(
+            get_proof_system()
+                .prove(
+                    proposal.prover_artefacts,
+                    &[proposal.aux_secret_key],
+                    &frame_aad,
+                )
+                .expect("Failed to prove frame"),
+        ),
+    )
+}
+
 #[test]
-fn test_create_validator() {
+fn test_sequential_invite_members() {
+    let mut rng = StdRng::seed_from_u64(0);
+
+    // Create Private ART
+    let leaf_secret = ScalarField::rand(&mut rng);
+    let (base_art, tree_key) =
+        PrivateART::new_art_from_secrets(&vec![leaf_secret], &CortadoAffine::generator())
+            .expect("Failed to create art from secret");
+    let base_stk = derive_stage_key(&StageKey::default(), tree_key.key)
+        .expect("Failed to derive base stage key");
+
+    // Create KeyedValidator
+    let mut keyed_validator = LinearKeyedValidator::new(base_art, base_stk, 0);
+
+    // Generate members leaf keys
+    let members_secrets: Vec<ScalarField> = (0..3)
+        .into_iter()
+        .map(|_| ScalarField::rand(&mut rng))
+        .collect();
+
+    for member_secret in members_secrets.iter() {
+        let proposal = keyed_validator
+            .propose_add_member(*member_secret)
+            .expect("Failed to propose add member");
+
+        let frame = frame_from_proposal(proposal, keyed_validator.epoch() + 1, b"Hello world!");
+
+        keyed_validator
+            .validate_and_derive_key(&frame)
+            .expect("Failed to validate frame");
+    }
+
+    assert_eq!(
+        keyed_validator.epoch, 3,
+        "After adding 3 member epoch should be 3"
+    );
+    assert_eq!(
+        LeafIter::new(keyed_validator.upstream_art.get_root()).count(),
+        4,
+        "In group should be 4 members"
+    );
+}
+
+#[test]
+fn test_sequential_invite_members_with_observer() {
+    let mut rng = StdRng::seed_from_u64(0);
+
+    let owner_leaf_secret = ScalarField::rand(&mut rng);
+    let (base_art, tree_key) =
+        PrivateART::new_art_from_secrets(&vec![owner_leaf_secret], &CortadoAffine::generator())
+            .expect("Failed to create art from secret");
+    let base_stk = derive_stage_key(&StageKey::default(), tree_key.key)
+        .expect("Failed to derive base stage key");
+
+    let mut owner_keyed_validator = LinearKeyedValidator::new(base_art, base_stk, 0);
+
+    let observer_leaf_secret = ScalarField::rand(&mut rng);
+
+    let proposal = owner_keyed_validator
+        .propose_add_member(observer_leaf_secret)
+        .expect("Failed to propose to add observer");
+    let frame = frame_from_proposal(proposal, owner_keyed_validator.epoch() + 1, b"Hello world!");
+    let (_, stage_key) = owner_keyed_validator
+        .validate_and_derive_key(&frame)
+        .expect("Failed to validate add observer frame");
+
+    let observer_art = PrivateART::from_public_art_and_secret(
+        owner_keyed_validator.upstream_art.public_art.clone(),
+        observer_leaf_secret,
+    )
+    .expect("Failed to create observer art");
+    let mut observer_keyed_validator =
+        LinearKeyedValidator::new(observer_art, stage_key, owner_keyed_validator.epoch);
+
+    let members_secrets: Vec<ScalarField> = (0..3)
+        .into_iter()
+        .map(|_| ScalarField::rand(&mut rng))
+        .collect();
+
+    for member_secret in members_secrets.iter() {
+        let proposal = owner_keyed_validator
+            .propose_add_member(*member_secret)
+            .expect("Failed to propose add member");
+
+        let frame =
+            frame_from_proposal(proposal, owner_keyed_validator.epoch() + 1, b"Hello world!");
+
+        owner_keyed_validator
+            .validate_and_derive_key(&frame)
+            .expect("Failed to validate frame (owner)");
+        observer_keyed_validator
+            .validate_and_derive_key(&frame)
+            .expect("Failed to validate frame (observer)");
+    }
+
+    assert_eq!(
+        owner_keyed_validator.epoch, 4,
+        "Group should have epoch 4 after adding 4 members"
+    );
+    assert_eq!(
+        LeafIter::new(owner_keyed_validator.upstream_art.get_root()).count(),
+        5,
+        "In group should be 5 members (owner + observer + 3 members)"
+    );
+
+    assert_eq!(owner_keyed_validator.epoch, observer_keyed_validator.epoch);
+    assert_eq!(
+        owner_keyed_validator.upstream_art,
+        observer_keyed_validator.upstream_art
+    );
+    assert_eq!(
+        owner_keyed_validator.upstream_stk,
+        observer_keyed_validator.upstream_stk
+    );
+    assert_eq!(
+        owner_keyed_validator.base_art,
+        observer_keyed_validator.base_art
+    );
+    assert_eq!(
+        owner_keyed_validator.base_stk,
+        observer_keyed_validator.base_stk
+    );
+}
+
+#[test]
+fn test_sequential_cross_key_updates() {
+    let mut rng = StdRng::seed_from_u64(0);
+
+    let owner_leaf_secret = ScalarField::rand(&mut rng);
+    let (base_art, tree_key) =
+        PrivateART::new_art_from_secrets(&vec![owner_leaf_secret], &CortadoAffine::generator())
+            .expect("Failed to create art from secret");
+    let base_stk = derive_stage_key(&StageKey::default(), tree_key.key)
+        .expect("Failed to derive base stage key");
+
+    let mut owner_keyed_validator = LinearKeyedValidator::new(base_art, base_stk, 0);
+
+    let observer_leaf_secret = ScalarField::rand(&mut rng);
+
+    let proposal = owner_keyed_validator
+        .propose_add_member(observer_leaf_secret)
+        .expect("Failed to propose to add observer");
+    let frame = frame_from_proposal(proposal, owner_keyed_validator.epoch() + 1, b"Hello world!");
+    let (_, stage_key) = owner_keyed_validator
+        .validate_and_derive_key(&frame)
+        .expect("Failed to validate add observer frame");
+
+    let observer_art = PrivateART::from_public_art_and_secret(
+        owner_keyed_validator.upstream_art.public_art.clone(),
+        observer_leaf_secret,
+    )
+    .expect("Failed to create observer art");
+    let mut observer_keyed_validator =
+        LinearKeyedValidator::new(observer_art, stage_key, owner_keyed_validator.epoch);
+
+    for _ in 0..10 {
+        let proposal = owner_keyed_validator
+            .propose_update_key()
+            .expect("Failed propose to key update for owner");
+        let frame =
+            frame_from_proposal(proposal, owner_keyed_validator.epoch() + 1, b"Hello world!");
+
+        owner_keyed_validator
+            .validate_and_derive_key(&frame)
+            .expect("Failed to validate frame (owner)");
+        observer_keyed_validator
+            .validate_and_derive_key(&frame)
+            .expect("Failed to validate frame (observer)");
+
+        let proposal = observer_keyed_validator
+            .propose_update_key()
+            .expect("Failed propose to key update for owner");
+        let frame = frame_from_proposal(
+            proposal,
+            observer_keyed_validator.epoch() + 1,
+            b"Hello world!",
+        );
+
+        owner_keyed_validator
+            .validate_and_derive_key(&frame)
+            .expect("Failed to validate frame (owner)");
+        observer_keyed_validator
+            .validate_and_derive_key(&frame)
+            .expect("Failed to validate frame (observer)");
+    }
+
+    assert_eq!(
+        owner_keyed_validator.epoch, 21,
+        "Group should have epoch 21 after adding member and 20 key updates "
+    );
+    assert_eq!(
+        LeafIter::new(owner_keyed_validator.upstream_art.get_root()).count(),
+        2,
+        "In group should be 2 members (owner + observer)"
+    );
+
+    assert_eq!(owner_keyed_validator.epoch, observer_keyed_validator.epoch);
+    assert_eq!(
+        owner_keyed_validator.upstream_art,
+        observer_keyed_validator.upstream_art
+    );
+    assert_eq!(
+        owner_keyed_validator.upstream_stk,
+        observer_keyed_validator.upstream_stk
+    );
+    assert_eq!(
+        owner_keyed_validator.base_art,
+        observer_keyed_validator.base_art
+    );
+    assert_eq!(
+        owner_keyed_validator.base_stk,
+        observer_keyed_validator.base_stk
+    );
+}
+
+#[test]
+fn test_concurrent_key_updates() {
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE) // щоб бачили trace/debug/info
+        .with_test_writer() // щоб писало в буфер тестів
+        .try_init();
+
+    let mut rng = StdRng::seed_from_u64(0);
+
+    let owner_leaf_secret = ScalarField::rand(&mut rng);
+
+    let (base_art, tree_key) =
+        PrivateART::new_art_from_secrets(&vec![owner_leaf_secret], &CortadoAffine::generator())
+            .expect("Failed to create art from secret");
+    let base_stk = derive_stage_key(&StageKey::default(), tree_key.key)
+        .expect("Failed to derive base stage key");
+
+    let mut owner_keyed_validator = LinearKeyedValidator::new(base_art, base_stk, 0);
+
+    let participant_leaf_secret = ScalarField::rand(&mut rng);
+
+    let proposal = owner_keyed_validator
+        .propose_add_member(participant_leaf_secret)
+        .expect("Failed to propose to add observer");
+    let frame = frame_from_proposal(proposal, owner_keyed_validator.epoch() + 1, b"Hello world!");
+    let (_, stage_key) = owner_keyed_validator
+        .validate_and_derive_key(&frame)
+        .expect("Failed to validate add observer frame");
+
+    let participant_art = PrivateART::from_public_art_and_secret(
+        owner_keyed_validator.upstream_art.public_art.clone(),
+        participant_leaf_secret,
+    )
+    .expect("Failed to create participant art");
+    let mut participant_keyed_validator =
+        LinearKeyedValidator::new(participant_art, stage_key, owner_keyed_validator.epoch());
+
+    let observer_leaf_secret = ScalarField::rand(&mut rng);
+
+    let proposal = owner_keyed_validator
+        .propose_add_member(observer_leaf_secret)
+        .expect("Failed to propose to add observer");
+    let frame = frame_from_proposal(proposal, owner_keyed_validator.epoch() + 1, b"Hello world!");
+    let (_, stage_key) = owner_keyed_validator
+        .validate_and_derive_key(&frame)
+        .expect("Failed to validate add observer frame");
+    let _ = participant_keyed_validator.validate_and_derive_key(&frame).expect("Failed to validate particiapnt");
+
+    let observer_art = PrivateART::from_public_art_and_secret(
+        owner_keyed_validator.upstream_art.public_art.clone(),
+        observer_leaf_secret,
+    )
+    .expect("Failed to create observer art");
+    let observer_keyed_validator =
+        LinearKeyedValidator::new(observer_art, stage_key, owner_keyed_validator.epoch());
+
+    assert_eq!(owner_keyed_validator.epoch(), participant_keyed_validator.epoch());
+    assert_eq!(observer_keyed_validator.epoch(), participant_keyed_validator.epoch());
+
+    let mut validators = vec![
+        owner_keyed_validator,
+        participant_keyed_validator,
+        observer_keyed_validator,
+    ];
+
+    for i in 3..7 {
+        let mut frames: Vec<frame::Frame> = Vec::with_capacity(3);
+
+        if i >> 2 & 1 == 1 {
+            trace!("Validator 0 proposal");
+            let proposal = validators[0]
+                .propose_update_key()
+                .expect("Failed to propose update key for validator 0");
+            frames.push(frame_from_proposal(
+                proposal,
+                validators[0].epoch() + 1,
+                b"Hello World",
+            ));
+        }
+
+        if i >> 1 & 1 == 1 {
+            trace!("Validator 1 proposal");
+            let proposal = validators[1]
+                .propose_update_key()
+                .expect("Failed to propose update key for validator 1");
+            frames.push(frame_from_proposal(
+                proposal,
+                validators[1].epoch() + 1,
+                b"Hello World",
+            ));
+        }
+
+        if i >> 0 & 1 == 1 {
+            trace!("Validator 2 proposal");
+            let proposal = validators[2]
+                .propose_update_key()
+                .expect("Failed to propose update key for validator 2");
+            frames.push(frame_from_proposal(
+                proposal,
+                validators[2].epoch() + 1,
+                b"Hello World",
+            ));
+        }
+
+        for (_, validator) in validators.iter_mut().enumerate() {
+            for (_, frame) in frames.iter().enumerate() {
+                let _ = validator
+                    .validate_and_derive_key(frame)
+                    .expect("Failed to validate frame");
+            }
+        }
+    }
+
+    assert_eq!(validators[0].upstream_art, validators[1].upstream_art);
+    assert_eq!(validators[2].upstream_art, validators[1].upstream_art);
+
+    assert_eq!(validators[0].upstream_stk, validators[1].upstream_stk);
+    assert_eq!(validators[2].upstream_stk, validators[1].upstream_stk);
+}
+
+// let _ = tracing_subscriber::fmt()
+// .with_max_level(tracing::Level::TRACE) // щоб бачили trace/debug/info
+// .with_test_writer() // щоб писало в буфер тестів
+// .try_init();
+
+#[test]
+fn test_create_validator2() {
     let mut rng = StdRng::seed_from_u64(0);
     let mut nonce = Nonce::new(0);
     let group_id = Uuid::new_v4();

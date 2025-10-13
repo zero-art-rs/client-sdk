@@ -4,7 +4,9 @@ use ark_ec::{AffineRepr, CurveGroup};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use prost::Message;
 use sha3::Digest;
-use zrt_art::types::{BranchChanges, NodeIndex, ProverArtefacts, PublicART, VerifierArtefacts};
+use zrt_art::types::{
+    BranchChanges, BranchChangesType, NodeIndex, ProverArtefacts, PublicART, VerifierArtefacts,
+};
 use zrt_crypto::schnorr;
 
 use uuid::Uuid;
@@ -293,6 +295,16 @@ pub enum GroupOperation {
     KeyUpdate(BranchChanges<CortadoAffine>),
     LeaveGroup(NodeIndex),
     DropGroup(Vec<u8>),
+}
+
+impl From<BranchChanges<CortadoAffine>> for GroupOperation {
+    fn from(value: BranchChanges<CortadoAffine>) -> Self {
+        match value.change_type {
+            BranchChangesType::MakeBlank => GroupOperation::RemoveMember(value),
+            BranchChangesType::AppendNode => GroupOperation::AddMember(value),
+            BranchChangesType::UpdateKey => GroupOperation::KeyUpdate(value),
+        }
+    }
 }
 
 impl TryFrom<zero_art_proto::GroupOperation> for GroupOperation {
