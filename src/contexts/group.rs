@@ -150,13 +150,29 @@ impl GroupContext {
         )?)?;
 
         let Some(operation) = operation else {
+            let sender_public_key = match protected_payload.protected_payload_tbs().sender() {
+                Sender::UserId(user_id) => self
+                    .group_info
+                    .members()
+                    .get(user_id)
+                    .ok_or(Error::SenderNotInGroup)?
+                    .public_key(),
+                Sender::LeafId(_) => unimplemented!(),
+            };
+
+            protected_payload.verify::<Sha3_256>(sender_public_key)?;
+            
+            if self.identity_public_key() == sender_public_key {
+                return Ok(vec![])
+            }
+
             return Ok(protected_payload
                 .protected_payload_tbs()
                 .payloads()
                 .to_vec());
         };
 
-        match operation {
+        let sender_public_key = match operation {
             types::GroupOperation::AddMember { member_public_key } => {
                 if self.group_info.members().is_empty() {
                     let group_info = protected_payload
@@ -200,6 +216,8 @@ impl GroupContext {
                 self.group_info
                     .members_mut()
                     .insert(member_public_key, member);
+
+                sender_public_key
             }
             types::GroupOperation::KeyUpdate {
                 old_public_key,
@@ -243,6 +261,8 @@ impl GroupContext {
                 self.group_info
                     .members_mut()
                     .update_leaf(old_public_key, new_public_key);
+
+                sender_public_key
             }
             types::GroupOperation::RemoveMember { member_public_key } => {
                 let sender_public_key = match protected_payload.protected_payload_tbs().sender() {
@@ -259,9 +279,16 @@ impl GroupContext {
                 self.group_info
                     .members_mut()
                     .remove_by_leaf(&member_public_key);
+
+                sender_public_key
             }
-            _ => {}
+            _ => CortadoAffine::identity()
+        };
+
+        if self.identity_public_key() == sender_public_key {
+            return Ok(vec![])
         }
+
 
         Ok(protected_payload
             .protected_payload_tbs()
