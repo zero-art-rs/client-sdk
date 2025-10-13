@@ -197,8 +197,10 @@ impl TryFrom<Vec<zero_art_proto::User>> for GroupMembers {
 
 impl From<GroupMembers> for Vec<zero_art_proto::User> {
     fn from(value: GroupMembers) -> Self {
-        value
-            .members
+        let mut items: Vec<(String, User)> = value.members.into_iter().collect();
+        items.sort_by(|a, b| a.0.cmp(&b.0));
+
+        items
             .into_iter()
             .map(|(id, mut user)| {
                 user.metadata = serialize(value.leaf_members.get_by_right(&id).unwrap()).unwrap();

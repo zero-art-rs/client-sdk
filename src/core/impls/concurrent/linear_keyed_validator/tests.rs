@@ -316,7 +316,9 @@ fn test_concurrent_key_updates() {
     let (_, stage_key) = owner_keyed_validator
         .validate_and_derive_key(&frame)
         .expect("Failed to validate add observer frame");
-    let _ = participant_keyed_validator.validate_and_derive_key(&frame).expect("Failed to validate particiapnt");
+    let _ = participant_keyed_validator
+        .validate_and_derive_key(&frame)
+        .expect("Failed to validate particiapnt");
 
     let observer_art = PrivateART::from_public_art_and_secret(
         owner_keyed_validator.upstream_art.public_art.clone(),
@@ -326,8 +328,14 @@ fn test_concurrent_key_updates() {
     let observer_keyed_validator =
         LinearKeyedValidator::new(observer_art, stage_key, owner_keyed_validator.epoch());
 
-    assert_eq!(owner_keyed_validator.epoch(), participant_keyed_validator.epoch());
-    assert_eq!(observer_keyed_validator.epoch(), participant_keyed_validator.epoch());
+    assert_eq!(
+        owner_keyed_validator.epoch(),
+        participant_keyed_validator.epoch()
+    );
+    assert_eq!(
+        observer_keyed_validator.epoch(),
+        participant_keyed_validator.epoch()
+    );
 
     let mut validators = vec![
         owner_keyed_validator,

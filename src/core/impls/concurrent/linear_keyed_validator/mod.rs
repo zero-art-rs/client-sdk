@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ark_ec::{AffineRepr, CurveGroup};
 use serde::{Deserialize, Serialize};
 use sha3::Sha3_256;
-use tracing::{debug, instrument, span, trace, Level};
+use tracing::{Level, debug, instrument, span, trace};
 use zrt_art::{
     traits::{ARTPrivateAPI, ARTPublicAPI, ARTPublicView},
     types::{BranchChanges, LeafStatus, PrivateART, PublicART},

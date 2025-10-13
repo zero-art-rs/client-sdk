@@ -81,7 +81,11 @@ impl GroupContext {
             Some(GroupOperation::Init(base_art.clone().into())),
             vec![],
         );
-        let protected_payload = encrypt(&base_stk, &ProtectedPayload::default().encode_to_vec(), &frame_tbs.associated_data::<Sha3_256>()?)?;
+        let protected_payload = encrypt(
+            &base_stk,
+            &ProtectedPayload::default().encode_to_vec(),
+            &frame_tbs.associated_data::<Sha3_256>()?,
+        )?;
         frame_tbs.set_protected_payload(protected_payload);
 
         let frame = frame_tbs.prove_schnorr::<Sha3_256>(identity_secret_key)?;
@@ -180,7 +184,6 @@ impl GroupContext {
                         .public_key(),
                     Sender::LeafId(_) => unimplemented!(),
                 };
-
 
                 trace!("Sender public key: {:?}", sender_public_key);
                 trace!("Signature: {:?}", protected_payload.signature());
@@ -307,7 +310,9 @@ impl GroupContext {
             vec![],
         );
 
-        protected_payload.verify::<Sha3_256>(self.identity_public_key()).unwrap();
+        protected_payload
+            .verify::<Sha3_256>(self.identity_public_key())
+            .unwrap();
         trace!("Valid with: {:?}", self.identity_public_key());
         trace!("Signature: {:?}", protected_payload.signature());
         trace!("Payload: {:?}", protected_payload);

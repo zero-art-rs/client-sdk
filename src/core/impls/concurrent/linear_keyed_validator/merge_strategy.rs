@@ -113,8 +113,14 @@ impl LinearKeyedValidator {
             upstream_art
         } else {
             let mut upstream_art = self.base_art.clone();
-            upstream_art
-                .merge_for_observer(&self.changes.clone().into_values().chain(once(changes.clone())).collect::<Vec<_>>())?;
+            upstream_art.merge_for_observer(
+                &self
+                    .changes
+                    .clone()
+                    .into_values()
+                    .chain(once(changes.clone()))
+                    .collect::<Vec<_>>(),
+            )?;
 
             upstream_art
         };

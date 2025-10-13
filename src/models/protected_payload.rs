@@ -39,12 +39,11 @@ impl ProtectedPayload {
     #[instrument]
     pub fn verify<D: Digest>(&self, public_key: CortadoAffine) -> Result<()> {
         let msg = D::digest(self.protected_payload_tbs.encode_to_vec());
-        trace!("Msg: {:?}", D::digest(self.protected_payload_tbs.encode_to_vec()));
-        Ok(schnorr::verify(
-            &self.signature,
-            &vec![public_key],
-            &msg,
-        )?)
+        trace!(
+            "Msg: {:?}",
+            D::digest(self.protected_payload_tbs.encode_to_vec())
+        );
+        Ok(schnorr::verify(&self.signature, &vec![public_key], &msg)?)
     }
 
     // Serialization
@@ -129,12 +128,8 @@ impl ProtectedPayloadTbs {
     pub fn sign<D: Digest>(self, secret_key: ScalarField) -> Result<ProtectedPayload> {
         let public_key = (CortadoAffine::generator() * secret_key).into_affine();
         let msg = D::digest(self.encode_to_vec());
-        trace!("Msg: {:?}", msg); 
-        let signature = schnorr::sign(
-            &vec![secret_key],
-            &vec![public_key],
-            &msg,
-        )?;
+        trace!("Msg: {:?}", msg);
+        let signature = schnorr::sign(&vec![secret_key], &vec![public_key], &msg)?;
         Ok(ProtectedPayload {
             protected_payload_tbs: self,
             signature,
