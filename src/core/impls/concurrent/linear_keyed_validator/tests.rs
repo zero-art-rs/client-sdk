@@ -28,14 +28,6 @@ impl Nonce {
     }
 }
 
-// Тест кейси:
-// Овнер додає учасників і обробляє власні ж фрейми послідовно
-// Овнер додає учасників, але пробує додати наступного не обробивши попереднього
-// Овнер оновлює ключ послідовно
-// Овнер додає учасника який приймає запрошення і оновлює ключ
-// Конкурентне оновлення ключів
-// Видалення учасника + фіналізація видалень
-
 fn frame_from_proposal(
     proposal: Proposal<CortadoAffine>,
     epoch: u64,
@@ -285,11 +277,6 @@ fn test_sequential_cross_key_updates() {
 
 #[test]
 fn test_concurrent_key_updates() {
-    let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE) // щоб бачили trace/debug/info
-        .with_test_writer() // щоб писало в буфер тестів
-        .try_init();
-
     let mut rng = StdRng::seed_from_u64(0);
 
     let owner_leaf_secret = ScalarField::rand(&mut rng);
@@ -402,11 +389,6 @@ fn test_concurrent_key_updates() {
     assert_eq!(validators[0].upstream_stk, validators[1].upstream_stk);
     assert_eq!(validators[2].upstream_stk, validators[1].upstream_stk);
 }
-
-// let _ = tracing_subscriber::fmt()
-// .with_max_level(tracing::Level::TRACE) // щоб бачили trace/debug/info
-// .with_test_writer() // щоб писало в буфер тестів
-// .try_init();
 
 #[test]
 fn test_create_validator2() {
