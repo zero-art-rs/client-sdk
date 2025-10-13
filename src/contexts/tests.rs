@@ -5,12 +5,12 @@ use uuid::Uuid;
 
 use ark_ec::{AffineRepr, CurveGroup};
 use sha3::Sha3_256;
-use tracing::trace;
 use zrt_art::types::PublicART;
 
 use crate::{
     contexts::{group::GroupContext, invite::InviteContext},
-    models, utils,
+    models::{self, group_info::public_key_to_id},
+    utils,
 };
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 
@@ -213,10 +213,6 @@ fn test_join_group() {
 
 #[test]
 fn test_invite_many_members_and_sync() {
-    let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE) // щоб бачили trace/debug/info
-        .with_test_writer() // щоб писало в буфер тестів
-        .try_init();
     let mut rng = StdRng::seed_from_u64(0);
 
     let group_id = Uuid::new_v4();
@@ -234,9 +230,6 @@ fn test_invite_many_members_and_sync() {
     group_context
         .process_frame(frame)
         .expect("Process initial frame");
-
-    trace!("Members: {:?}", group_context.group_info().members());
-    trace!("Identity public key: {:?}", identity_public_key);
 
     let members_secrets: Vec<ScalarField> = (0..3)
         .into_iter()
@@ -301,7 +294,6 @@ fn test_invite_many_members_and_sync() {
 
     for (i, context) in contexts.iter_mut().enumerate() {
         for j in i + 3..frames.len() {
-            trace!("Frame: {:?}", frames[j].frame_tbs().epoch());
             context
                 .process_frame(frames[j].clone())
                 .expect("Failed to process frame");
@@ -349,4 +341,123 @@ fn test_invite_many_members_and_sync() {
     contexts[3]
         .process_frame(frame.clone())
         .expect("Failed to process frame");
+}
+
+#[test]
+fn test_remove_member() {
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE) // щоб бачили trace/debug/info
+        .with_test_writer() // щоб писало в буфер тестів
+        .try_init();
+    let mut rng = StdRng::seed_from_u64(0);
+
+    let group_id = Uuid::new_v4();
+
+    let group_info =
+        models::group_info::GroupInfo::new(group_id, String::from("Group"), Utc::now(), vec![]);
+
+    let identity_secret_key = ScalarField::rand(&mut rng);
+    let identity_public_key = (CortadoAffine::generator() * identity_secret_key).into_affine();
+
+    // Create group
+    let owner = models::group_info::User::new(String::from("Owner"), identity_public_key, vec![]);
+    let (mut group_context, frame) = GroupContext::new(identity_secret_key, owner, group_info)
+        .expect("Failed to create group context");
+    group_context
+        .process_frame(frame)
+        .expect("Process initial frame");
+
+    let members_secrets: Vec<ScalarField> = (0..3)
+        .into_iter()
+        .map(|_| ScalarField::rand(&mut rng))
+        .collect();
+    let member_public_keys = members_secrets
+        .iter()
+        .map(|s| (CortadoAffine::generator() * s).into_affine())
+        .collect::<Vec<CortadoAffine>>();
+
+    let mut frames: Vec<models::frame::Frame> = Vec::with_capacity(members_secrets.len());
+    let mut trees: Vec<PublicART<CortadoAffine>> = Vec::with_capacity(members_secrets.len());
+    let mut invites: Vec<models::invite::Invite> = Vec::with_capacity(members_secrets.len());
+
+    for public_key in member_public_keys.iter() {
+        let invitee = models::invite::Invitee::Identified {
+            identity_public_key: *public_key,
+            spk_public_key: None,
+        };
+        let (frame, invite) = group_context
+            .add_member(invitee, vec![])
+            .expect("Failed to propose add member");
+        group_context
+            .process_frame(frame.clone())
+            .expect("Failed to process add member proposal");
+
+        frames.push(frame);
+        trees.push(group_context.tree());
+        invites.push(invite);
+    }
+
+    let mut contexts: Vec<GroupContext> = Vec::with_capacity(members_secrets.len());
+
+    for (i, secret_key) in members_secrets.iter().enumerate() {
+        let invite_context = InviteContext::new(*secret_key, None, invites[i].clone())
+            .expect("Failed to create invite context");
+        let mut member_group_context = invite_context
+            .upgrade(trees[i].clone())
+            .expect("Failed to upgrade group context");
+
+        for frame in frames.iter().skip(i) {
+            member_group_context
+                .process_frame(frame.clone())
+                .expect("Failed to process frame");
+        }
+
+        let user =
+            models::group_info::User::new(format!("Member {}", i), member_public_keys[i], vec![]);
+        let frame = member_group_context
+            .join_group_as(user)
+            .expect("Failed to join group");
+
+        member_group_context
+            .process_frame(frame.clone())
+            .expect("Failed to process own join group frame");
+
+        frames.push(frame);
+        contexts.push(member_group_context);
+    }
+
+    contexts.insert(0, group_context);
+
+    for (i, context) in contexts.iter_mut().enumerate() {
+        for j in i + 3..frames.len() {
+            context
+                .process_frame(frames[j].clone())
+                .expect("Failed to process frame");
+        }
+    }
+
+    let user_id = public_key_to_id(member_public_keys[0]);
+
+    let frame = contexts[0]
+        .remove_member(&user_id, vec![])
+        .expect("Failed to propose remove member");
+
+    contexts[0]
+        .process_frame(frame.clone())
+        .expect("Failed to process frame");
+    contexts[1]
+        .process_frame(frame.clone())
+        .expect_err("Should error");
+    contexts[2]
+        .process_frame(frame.clone())
+        .expect("Failed to process frame");
+    contexts[3]
+        .process_frame(frame.clone())
+        .expect("Failed to process frame");
+
+    assert_eq!(
+        contexts[0].group_info().members().len(),
+        3,
+        "After member removing there should be 3 users"
+    );
 }
