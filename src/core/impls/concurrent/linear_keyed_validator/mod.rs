@@ -197,6 +197,9 @@ impl KeyedValidator for LinearKeyedValidator {
                 Ok((Some(operation), stage_key))
             }
             frame::GroupOperation::RemoveMember(changes) => {
+                let span = span!(Level::TRACE, "remove_member_frame");
+                let _enter = span.enter();
+
                 if self.upstream_art.node_index == changes.node_index {
                     return Err(Error::UserRemovedFromGroup);
                 }

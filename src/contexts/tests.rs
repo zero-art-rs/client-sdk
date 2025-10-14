@@ -1,6 +1,7 @@
 use ark_ff::UniformRand;
 use ark_std::rand::{SeedableRng, rngs::StdRng};
 use chrono::Utc;
+use tracing::trace;
 use uuid::Uuid;
 
 use ark_ec::{AffineRepr, CurveGroup};
@@ -461,5 +462,7 @@ fn test_remove_member() {
         "After member removing there should be 3 users"
     );
 
-    assert!(contexts[0].group_info().members().get(&public_key_to_id(identity_public_key)).is_some())
+    assert!(contexts[0].group_info().members().get(&public_key_to_id(identity_public_key)).is_some());
+
+    trace!("{:?}", contexts[0].group_info().members());
 }
