@@ -330,6 +330,7 @@ impl TryFrom<zero_art_proto::GroupOperation> for GroupOperation {
             zero_art_proto::group_operation::Operation::DropGroup(challenge) => {
                 GroupOperation::DropGroup(challenge)
             }
+            zero_art_proto::group_operation::Operation::Aggregated(_) => unimplemented!(),
         };
 
         Ok(group_operation)

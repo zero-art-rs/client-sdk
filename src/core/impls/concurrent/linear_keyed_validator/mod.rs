@@ -6,7 +6,7 @@ use sha3::Sha3_256;
 use tracing::{Level, debug, instrument, span, trace};
 use zrt_art::{
     traits::{ARTPrivateAPI, ARTPublicAPI, ARTPublicView},
-    types::{BranchChanges, LeafStatus, PrivateART, PublicART},
+    types::{BranchChanges, LeafStatus, NodeIndex, PrivateART, PublicART},
 };
 use zrt_crypto::schnorr;
 
@@ -242,14 +242,16 @@ impl KeyedValidator for LinearKeyedValidator {
                 frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
 
                 let member_public_key = if is_next_epoch {
-                    self.base_art.get_node(&changes.node_index)?.get_public_key()
+                    self.base_art
+                        .get_node(&changes.node_index)?
+                        .get_public_key()
                 } else {
-                    self.upstream_art.get_node(&changes.node_index)?.get_public_key()
+                    self.upstream_art
+                        .get_node(&changes.node_index)?
+                        .get_public_key()
                 };
 
-                let operation = GroupOperation::RemoveMember {
-                    member_public_key,
-                };
+                let operation = GroupOperation::RemoveMember { member_public_key };
 
                 let stage_key = if is_next_epoch {
                     self.apply_changes(changes)?
@@ -404,6 +406,10 @@ impl LinearKeyedValidator {
 
     pub fn is_participant(&self) -> bool {
         self.participant.is_some()
+    }
+
+    pub fn node_index(&self) -> &NodeIndex {
+        &self.upstream_art.node_index
     }
 }
 

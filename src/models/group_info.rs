@@ -15,19 +15,19 @@ const USER_ID_LENGTH: usize = 32;
 #[derive(Debug, Default, Clone)]
 pub struct GroupInfo {
     id: Uuid,
-    name: String,
+    pub name: String,
     created: DateTime<Utc>,
-    metadata: Vec<u8>,
+    pub picture: Vec<u8>,
     members: GroupMembers,
 }
 
 impl GroupInfo {
-    pub fn new(id: Uuid, name: String, created: DateTime<Utc>, metadata: Vec<u8>) -> Self {
+    pub fn new(id: Uuid, name: String, created: DateTime<Utc>, picture: Vec<u8>) -> Self {
         Self {
             id,
             name,
             created,
-            metadata,
+            picture,
             members: GroupMembers::default(),
         }
     }
@@ -37,16 +37,8 @@ impl GroupInfo {
         self.id
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
     pub fn created(&self) -> &DateTime<Utc> {
         &self.created
-    }
-
-    pub fn metadata(&self) -> &[u8] {
-        &self.metadata
     }
 
     pub fn members(&self) -> &GroupMembers {
@@ -81,7 +73,7 @@ impl TryFrom<zero_art_proto::GroupInfo> for GroupInfo {
             id: Uuid::parse_str(&value.id).map_err(|_| Error::RequiredFieldAbsent)?,
             name: value.name,
             created,
-            metadata: value.picture,
+            picture: value.picture,
             members: value.members.try_into()?,
         })
     }
@@ -96,7 +88,7 @@ impl From<GroupInfo> for zero_art_proto::GroupInfo {
                 seconds: value.created.timestamp(),
                 nanos: value.created.timestamp_subsec_nanos() as i32,
             }),
-            picture: value.metadata,
+            picture: value.picture,
             members: value.members.into(),
         }
     }
@@ -140,13 +132,18 @@ impl GroupMembers {
     pub fn update_leaf(&mut self, old_leaf: CortadoAffine, new_leaf: CortadoAffine) -> Option<()> {
         let user_id = self.leaf_members.get_by_left(&old_leaf)?.to_owned();
         let _ = self.leaf_members.remove_by_left(&old_leaf)?;
-        self.leaf_members.insert(new_leaf, user_id);
+        self.leaf_members.insert(new_leaf, user_id.clone());
+        self.members.get_mut(&user_id).unwrap().leaf_key = new_leaf;
 
         None
     }
 
     pub fn get(&self, id: &str) -> Option<&User> {
         self.members.get(id)
+    }
+
+    pub fn get_mut(&mut self, id: &str) -> Option<&mut User> {
+        self.members.get_mut(id)
     }
 
     pub fn get_leaf(&self, id: &str) -> Option<&CortadoAffine> {
@@ -186,9 +183,7 @@ impl TryFrom<Vec<zero_art_proto::User>> for GroupMembers {
         for proto_user in value {
             let user: User = proto_user.try_into()?;
 
-            let leaf: CortadoAffine = deserialize(&user.metadata)?;
-
-            members.insert(leaf, user);
+            members.insert(user.leaf_key, user);
         }
 
         Ok(members)
@@ -199,34 +194,30 @@ impl From<GroupMembers> for Vec<zero_art_proto::User> {
     fn from(value: GroupMembers) -> Self {
         let mut items: Vec<(String, User)> = value.members.into_iter().collect();
         items.sort_by(|a, b| a.0.cmp(&b.0));
-
-        items
-            .into_iter()
-            .map(|(id, mut user)| {
-                user.metadata = serialize(value.leaf_members.get_by_right(&id).unwrap()).unwrap();
-                user.into()
-            })
-            .collect()
+        items.into_iter().map(|(_, user)| user.into()).collect()
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct User {
     id: String,
-    name: String,
+    pub name: String,
     public_key: CortadoAffine,
-    metadata: Vec<u8>,
-    role: Role,
+    pub picture: Vec<u8>,
+    pub role: Role,
+    leaf_key: CortadoAffine,
 }
 
 impl User {
-    pub fn new(name: String, public_key: CortadoAffine, metadata: Vec<u8>) -> Self {
+    pub fn new(name: String, public_key: CortadoAffine, picture: Vec<u8>) -> Self {
         Self {
             id: public_key_to_id(public_key),
             name,
             public_key,
-            metadata,
+            picture,
             role: Role::default(),
+
+            leaf_key: CortadoAffine::default(),
         }
     }
 
@@ -234,14 +225,16 @@ impl User {
         id: String,
         name: String,
         public_key: CortadoAffine,
-        metadata: Vec<u8>,
+        picture: Vec<u8>,
     ) -> Self {
         Self {
             id,
             name,
             public_key,
-            metadata,
+            picture,
             role: Role::default(),
+
+            leaf_key: CortadoAffine::default(),
         }
     }
 
@@ -254,10 +247,6 @@ impl User {
         &self.id
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
     pub fn public_key(&self) -> CortadoAffine {
         self.public_key
     }
@@ -266,16 +255,12 @@ impl User {
         &mut self.public_key
     }
 
-    pub fn metadata(&self) -> &[u8] {
-        &self.metadata
+    pub fn leaf_key(&self) -> CortadoAffine {
+        self.leaf_key
     }
 
-    pub fn role(&self) -> Role {
-        self.role
-    }
-
-    pub fn role_mut(&mut self) -> &mut Role {
-        &mut self.role
+    pub fn leaf_key_mut(&mut self) -> &mut CortadoAffine {
+        &mut self.leaf_key
     }
 
     // Serialization
@@ -294,6 +279,7 @@ impl TryFrom<zero_art_proto::User> for User {
 
     fn try_from(value: zero_art_proto::User) -> Result<Self> {
         let public_key = deserialize(&value.public_key)?;
+        let leaf_key = deserialize(&value.leaf_key)?;
         let role = zero_art_proto::Role::try_from(value.role)?;
         if value.id.len() != USER_ID_LENGTH || !value.id.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(Error::InvalidInput);
@@ -303,8 +289,9 @@ impl TryFrom<zero_art_proto::User> for User {
             id: value.id,
             name: value.name,
             public_key,
-            metadata: value.picture,
+            picture: value.picture,
             role: role.into(),
+            leaf_key,
         })
     }
 }
@@ -315,8 +302,9 @@ impl From<User> for zero_art_proto::User {
             id: value.id,
             name: value.name,
             public_key: serialize(value.public_key).unwrap(),
-            picture: value.metadata,
+            picture: value.picture,
             role: value.role as i32,
+            leaf_key: serialize(value.leaf_key).unwrap(),
         }
     }
 }

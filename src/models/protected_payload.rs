@@ -8,7 +8,7 @@ use zrt_crypto::schnorr;
 
 use crate::{
     errors::{Error, Result},
-    models::payload::Payload,
+    models::payload::GroupActionPayload,
     zero_art_proto,
 };
 
@@ -86,22 +86,25 @@ impl From<ProtectedPayload> for zero_art_proto::ProtectedPayload {
 pub struct ProtectedPayloadTbs {
     seq_num: u64,
     created: DateTime<Utc>,
-    payloads: Vec<Payload>,
+    content: Vec<u8>,
     sender: Sender,
+    group_actions: Vec<GroupActionPayload>,
 }
 
 impl ProtectedPayloadTbs {
     pub fn new(
         seq_num: u64,
         created: DateTime<Utc>,
-        payloads: Vec<Payload>,
+        content: Vec<u8>,
         sender: Sender,
+        group_actions: Vec<GroupActionPayload>,
     ) -> Self {
         Self {
             seq_num,
             created,
-            payloads,
+            content,
             sender,
+            group_actions,
         }
     }
 
@@ -115,12 +118,16 @@ impl ProtectedPayloadTbs {
         &self.created
     }
 
-    pub fn payloads(&self) -> &[Payload] {
-        &self.payloads
+    pub fn content(&self) -> &[u8] {
+        &self.content
     }
 
     pub fn sender(&self) -> &Sender {
         &self.sender
+    }
+
+    pub fn group_actions(&self) -> &[GroupActionPayload] {
+        &self.group_actions
     }
 
     // Sign payload and return ProtectedPayload
@@ -156,17 +163,18 @@ impl TryFrom<zero_art_proto::ProtectedPayloadTbs> for ProtectedPayloadTbs {
             DateTime::from_timestamp(timestamp_proto.seconds, timestamp_proto.nanos as u32)
                 .ok_or(Error::RequiredFieldAbsent)?;
         let sender = value.sender.ok_or(Error::RequiredFieldAbsent)?.into();
-        let payloads = value
-            .payload
+        let group_actions = value
+            .group_actions
             .into_iter()
-            .map(Payload::try_from)
-            .collect::<Result<Vec<Payload>>>()?;
+            .map(GroupActionPayload::try_from)
+            .collect::<Result<Vec<GroupActionPayload>>>()?;
 
         Ok(Self {
             seq_num: value.seq_num,
             created,
-            payloads,
+            content: value.content,
             sender,
+            group_actions,
         })
     }
 }
@@ -177,16 +185,17 @@ impl From<ProtectedPayloadTbs> for zero_art_proto::ProtectedPayloadTbs {
             seconds: value.created.timestamp(),
             nanos: value.created.timestamp_subsec_nanos() as i32,
         };
-        let payload = value
-            .payloads
+        let group_actions = value
+            .group_actions
             .into_iter()
-            .map(zero_art_proto::Payload::from)
-            .collect::<Vec<zero_art_proto::Payload>>();
+            .map(zero_art_proto::GroupActionPayload::from)
+            .collect::<Vec<zero_art_proto::GroupActionPayload>>();
         let sender = value.sender.into();
         Self {
             seq_num: value.seq_num,
             created: Some(created),
-            payload,
+            content: value.content,
+            group_actions,
             sender: Some(sender),
         }
     }
