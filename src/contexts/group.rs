@@ -12,21 +12,16 @@ use sha3::{Digest, Sha3_256};
 use zrt_art::types::{PrivateART, PublicART};
 
 use crate::{
-    core::{
+    bounded_map::BoundedMap, core::{
         impls::concurrent::linear_keyed_validator::LinearKeyedValidator,
         traits::{KeyedValidator, Validator},
-    },
-    errors::{Error, Result},
-    models::{
+    }, errors::{Error, Result}, models::{
         frame::{Frame, FrameTbs, GroupOperation, Proof},
-        group_info::{GroupInfo, Role, User, public_key_to_id},
+        group_info::{public_key_to_id, GroupInfo, Role, User},
         invite::{Invite, InviteTbs, Invitee, ProtectedInviteData},
         payload::{GroupActionPayload, Payload},
         protected_payload::{ProtectedPayload, ProtectedPayloadTbs, Sender},
-    },
-    proof_system::get_proof_system,
-    types,
-    utils::{decrypt, derive_invite_key, derive_stage_key, encrypt, serialize},
+    }, proof_system::get_proof_system, types, utils::{decrypt, derive_invite_key, derive_stage_key, encrypt, serialize}
 };
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
@@ -55,6 +50,8 @@ pub struct GroupContext {
     group_info: GroupInfo,
     seq_num: u64,
     nonce: Nonce,
+    is_last_sender: bool,
+    sended_frames: BoundedMap<[u8; 32], ()>
 }
 
 impl GroupContext {
@@ -97,6 +94,8 @@ impl GroupContext {
                 group_info,
                 seq_num: 0,
                 nonce: Nonce(0),
+                is_last_sender: false,
+                sended_frames: BoundedMap::with_capacity(8)
             },
             frame,
         ))
@@ -135,6 +134,8 @@ impl GroupContext {
             group_info,
             seq_num,
             nonce,
+            is_last_sender: false,
+            sended_frames: BoundedMap::with_capacity(8)
         }
     }
 
@@ -142,6 +143,8 @@ impl GroupContext {
     pub fn process_frame(&mut self, frame: Frame) -> Result<Vec<Payload>> {
         let mut validator = self.validator.lock().unwrap();
         let (operation, stage_key) = validator.validate_and_derive_key(&frame)?;
+
+        self.is_last_sender =  self.sended_frames.contains_key(&Sha3_256::digest(frame.encode_to_vec()?).into());
 
         let protected_payload = ProtectedPayload::decode(&decrypt(
             &stage_key,
@@ -379,6 +382,8 @@ impl GroupContext {
 
         let invite = invite_tbs.sign::<Sha3_256>(self.identity_secret_key)?;
 
+        self.sended_frames.insert(Sha3_256::digest(frame.encode_to_vec()?).into(), ());
+
         Ok((frame, invite))
     }
 
@@ -442,6 +447,8 @@ impl GroupContext {
         )?);
         let frame = Frame::new(frame_tbs, proof);
 
+        self.sended_frames.insert(Sha3_256::digest(frame.encode_to_vec()?).into(), ());
+
         Ok(frame)
     }
 
@@ -459,7 +466,7 @@ impl GroupContext {
         let protected_payload = protected_payload_tbs.sign::<Sha3_256>(self.identity_secret_key)?;
 
         // Predict add member changes
-        let frame = if validator.is_participant() {
+        let frame = if self.is_last_sender {
             let mut frame_tbs = FrameTbs::new(
                 self.group_info.id(),
                 validator.epoch(),
@@ -504,6 +511,8 @@ impl GroupContext {
             Frame::new(frame_tbs, proof)
         };
 
+        self.sended_frames.insert(Sha3_256::digest(frame.encode_to_vec()?).into(), ());
+
         Ok(frame)
     }
 
@@ -545,7 +554,12 @@ impl GroupContext {
             &[proposal.aux_secret_key],
             &Sha3_256::digest(frame_tbs.encode_to_vec()?),
         )?);
-        Ok(Frame::new(frame_tbs, proof))
+
+        let frame = Frame::new(frame_tbs, proof);
+
+        self.sended_frames.insert(Sha3_256::digest(frame.encode_to_vec()?).into(), ());
+
+        Ok(frame)
     }
 
     fn compute_leaf_secret_for_invitee(
