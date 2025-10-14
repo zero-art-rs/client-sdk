@@ -4,7 +4,7 @@ use ark_std::rand::thread_rng;
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use std::sync::Mutex;
-use tracing::{instrument, span, trace, Level};
+use tracing::{Level, instrument, span, trace};
 use zrt_crypto::schnorr;
 
 use serde::{Deserialize, Serialize};
@@ -307,6 +307,7 @@ impl GroupContext {
                 };
                 protected_payload.verify::<Sha3_256>(sender_public_key)?;
 
+                trace!("Removed member leaf public key: {:?}", member_public_key);
                 self.group_info
                     .members_mut()
                     .remove_by_leaf(&member_public_key);
