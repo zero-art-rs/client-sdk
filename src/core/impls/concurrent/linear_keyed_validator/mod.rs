@@ -237,8 +237,15 @@ impl KeyedValidator for LinearKeyedValidator {
                 };
 
                 frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
+
+                let member_public_key = if is_next_epoch {
+                    self.base_art.get_node(&changes.node_index)?.get_public_key()
+                } else {
+                    self.upstream_art.get_node(&changes.node_index)?.get_public_key()
+                };
+
                 let operation = GroupOperation::RemoveMember {
-                    member_public_key: public_key,
+                    member_public_key,
                 };
 
                 let stage_key = if is_next_epoch {

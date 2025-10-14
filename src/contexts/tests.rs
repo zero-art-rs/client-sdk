@@ -460,4 +460,6 @@ fn test_remove_member() {
         3,
         "After member removing there should be 3 users"
     );
+
+    assert!(contexts[0].group_info().members().get(&public_key_to_id(identity_public_key)).is_some())
 }
