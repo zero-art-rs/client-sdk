@@ -75,10 +75,15 @@ message GroupActionPayload {
   }
 }
 
+// vector of Payloads
+message Payloads {
+	repeated Payload payloads = 1;
+}
+
 // Payload wrapper
 message Payload {
 	reserved 10;
-	
+
 	oneof content {
 		CRDTPayload crdt = 1;
 		ChatPayload chat = 2;

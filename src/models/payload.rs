@@ -60,6 +60,25 @@ impl From<Payload> for zero_art_proto::Payload {
     }
 }
 
+impl TryFrom<zero_art_proto::Payloads> for Vec<Payload> {
+    type Error = Error;
+
+    fn try_from(value: zero_art_proto::Payloads) -> std::result::Result<Self, Self::Error> {
+        value.payloads.into_iter().map(Payload::try_from).collect()
+    }
+}
+
+impl From<Vec<Payload>> for zero_art_proto::Payloads {
+    fn from(value: Vec<Payload>) -> Self {
+        Self {
+            payloads: value
+                .into_iter()
+                .map(zero_art_proto::Payload::from)
+                .collect(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum GroupActionPayload {
     Init(GroupInfo),
