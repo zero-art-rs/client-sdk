@@ -4,7 +4,7 @@ use ark_std::rand::thread_rng;
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use std::sync::Mutex;
-use tracing::{instrument, trace};
+use tracing::{instrument, span, trace, Level};
 use zrt_crypto::schnorr;
 
 use serde::{Deserialize, Serialize};
@@ -293,6 +293,9 @@ impl GroupContext {
                 sender_public_key
             }
             types::GroupOperation::RemoveMember { member_public_key } => {
+                let span = span!(Level::TRACE, "remove_member_operation");
+                let _enter = span.enter();
+
                 let sender_public_key = match protected_payload.protected_payload_tbs().sender() {
                     Sender::UserId(user_id) => self
                         .group_info
@@ -307,6 +310,8 @@ impl GroupContext {
                 self.group_info
                     .members_mut()
                     .remove_by_leaf(&member_public_key);
+
+                trace!("Group state: {:?}", self.group_info);
 
                 sender_public_key
             }
