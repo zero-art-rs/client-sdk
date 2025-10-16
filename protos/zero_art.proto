@@ -6,9 +6,16 @@ package zero_art_proto;
 
 enum Role {
 	READ = 0; // only read permission
-		WRITE = 1; // only write
-		OWNERSHIP = 2; // owner
-		ADMIN = 3; // administrator
+	WRITE = 1; // only write
+	OWNERSHIP = 2; // owner
+	ADMIN = 3; // administrator
+}
+
+enum Status {
+	ACTIVE = 0; // user accept invite and in group
+	INVITED = 1; // user invited to group
+	LEFT = 2; // user want to leave from group
+	PENDING_REMOVAL = 3; // user already deleted from group, but pending to others confirm his removal
 }
 
 // User definition
@@ -19,6 +26,8 @@ message User {
 	bytes picture = 4; // user picture
 	Role role = 5; // user role
 	bytes leaf_key = 10; // user leaf public key
+
+	Status status = 11; // user status
 }
 
 enum ContentAttachmentType {

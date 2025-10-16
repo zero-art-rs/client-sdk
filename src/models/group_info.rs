@@ -206,6 +206,7 @@ pub struct User {
     pub picture: Vec<u8>,
     pub role: Role,
     leaf_key: CortadoAffine,
+    pub status: Status,
 }
 
 impl User {
@@ -218,6 +219,7 @@ impl User {
             role: Role::default(),
 
             leaf_key: CortadoAffine::default(),
+            status: Status::default(),
         }
     }
 
@@ -235,6 +237,7 @@ impl User {
             role: Role::default(),
 
             leaf_key: CortadoAffine::default(),
+            status: Status::default(),
         }
     }
 
@@ -281,6 +284,7 @@ impl TryFrom<zero_art_proto::User> for User {
         let public_key = deserialize(&value.public_key)?;
         let leaf_key = deserialize(&value.leaf_key)?;
         let role = zero_art_proto::Role::try_from(value.role)?;
+        let status = zero_art_proto::Status::try_from(value.status)?;
         if value.id.len() != USER_ID_LENGTH || !value.id.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(Error::InvalidInput);
         }
@@ -292,6 +296,7 @@ impl TryFrom<zero_art_proto::User> for User {
             picture: value.picture,
             role: role.into(),
             leaf_key,
+            status: status.into(),
         })
     }
 }
@@ -305,6 +310,7 @@ impl From<User> for zero_art_proto::User {
             picture: value.picture,
             role: value.role as i32,
             leaf_key: serialize(value.leaf_key).unwrap(),
+            status: value.status as i32,
         }
     }
 }
@@ -336,6 +342,37 @@ impl From<Role> for zero_art_proto::Role {
             Role::Write => zero_art_proto::Role::Write,
             Role::Ownership => zero_art_proto::Role::Ownership,
             Role::Admin => zero_art_proto::Role::Admin,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Copy)]
+pub enum Status {
+    Active,
+    #[default]
+    Invited,
+    Left,
+    PendingRemoval,
+}
+
+impl From<zero_art_proto::Status> for Status {
+    fn from(value: zero_art_proto::Status) -> Self {
+        match value {
+            zero_art_proto::Status::Active => Self::Active,
+            zero_art_proto::Status::Invited => Self::Invited,
+            zero_art_proto::Status::Left => Self::Left,
+            zero_art_proto::Status::PendingRemoval => Self::PendingRemoval,
+        }
+    }
+}
+
+impl From<Status> for zero_art_proto::Status {
+    fn from(value: Status) -> Self {
+        match value {
+            Status::Active => zero_art_proto::Status::Active,
+            Status::Invited => zero_art_proto::Status::Invited,
+            Status::Left => zero_art_proto::Status::Left,
+            Status::PendingRemoval => zero_art_proto::Status::PendingRemoval,
         }
     }
 }

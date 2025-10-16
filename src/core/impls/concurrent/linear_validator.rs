@@ -155,7 +155,7 @@ impl Validator for LinearValidator {
 
                 let public_key = self.upstream_art.get_node(node_index)?.get_public_key();
                 frame.verify_schnorr::<Sha3_256>(public_key)?;
-                Ok(Some(GroupOperation::LeaveGroup))
+                Ok(Some(GroupOperation::LeaveGroup {member_public_key: public_key}))
             }
             frame::GroupOperation::DropGroup(_) => unimplemented!(),
         }
