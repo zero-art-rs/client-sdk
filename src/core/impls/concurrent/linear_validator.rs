@@ -148,14 +148,41 @@ impl Validator for LinearValidator {
                 frame.verify_schnorr::<Sha3_256>(owner_public_key)?;
                 Ok(Some(GroupOperation::Init))
             }
-            frame::GroupOperation::LeaveGroup(node_index) => {
-                if is_next_epoch {
+            frame::GroupOperation::LeaveGroup(changes) => {
+                if !is_next_epoch && self.closed {
                     return Err(Error::InvalidEpoch);
                 }
 
-                let public_key = self.upstream_art.get_node(node_index)?.get_public_key();
-                frame.verify_schnorr::<Sha3_256>(public_key)?;
-                Ok(Some(GroupOperation::LeaveGroup {member_public_key: public_key}))
+                let (verifier_artefacts, public_key) = if is_next_epoch {
+                    let verifier_artefacts = self
+                        .upstream_art
+                        .compute_artefacts_for_verification(changes)?;
+                    let public_key = self
+                        .upstream_art
+                        .get_node(&changes.node_index)?
+                        .get_public_key();
+                    (verifier_artefacts, public_key)
+                } else {
+                    let verifier_artefacts =
+                        self.base_art.compute_artefacts_for_verification(changes)?;
+                    let public_key = self
+                        .base_art
+                        .get_node(&changes.node_index)?
+                        .get_public_key();
+                    (verifier_artefacts, public_key)
+                };
+
+                frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
+                let operation = GroupOperation::LeaveGroup {
+                    old_public_key: public_key,
+                    new_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
+                };
+
+                self.apply_changes(changes, is_next_epoch)?;
+
+                self.closed = false;
+
+                Ok(Some(operation))
             }
             frame::GroupOperation::DropGroup(_) => unimplemented!(),
         }

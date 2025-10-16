@@ -379,13 +379,39 @@ impl GroupContext {
 
                 sender_public_key
             }
-            types::GroupOperation::LeaveGroup { member_public_key } => {
-                if let Some(user_id) = self.group_info.members().get_id(&member_public_key).cloned() {
-                    let user = self.group_info.members_mut().get_mut(&user_id).unwrap();
-                    user.status = Status::Left
+            types::GroupOperation::LeaveGroup { old_public_key, new_public_key } => {
+                let sender_public_key = match protected_payload.protected_payload_tbs().sender() {
+                    Sender::UserId(user_id) => self
+                        .group_info
+                        .members()
+                        .get(user_id)
+                        .ok_or(Error::SenderNotInGroup)?
+                        .public_key(),
+                    Sender::LeafId(_) => {
+                        // TODO: Map for leafs
+                        old_public_key
+                    }
+                };
+
+                if let Err(e) = protected_payload.verify::<Sha3_256>(sender_public_key) {
+                    if !self.accept_unverified {
+                        return Err(e);
+                    }
+                } else {
+                    verified = true
                 }
-                
-                CortadoAffine::identity()
+
+                let user_id = self.group_info.members().get_id(&old_public_key).cloned();
+
+                if let Some(user_id) = user_id {
+                    self.group_info.members_mut().get_mut(&user_id).unwrap().status = Status::Left
+                }
+
+                self.group_info
+                    .members_mut()
+                    .update_leaf(old_public_key, new_public_key);
+
+                sender_public_key
             },
             _ => CortadoAffine::identity(),
         };
@@ -612,42 +638,44 @@ impl GroupContext {
 
     #[instrument(skip_all)]
     pub fn leave_group(&mut self) -> Result<Frame> {
-        let validator = self.validator.lock().unwrap();
+        let mut validator = self.validator.lock().unwrap();
 
         let protected_payload_tbs = ProtectedPayloadTbs::new(
             self.seq_num,
             Utc::now(),
             vec![],
             Sender::UserId(public_key_to_id(self.identity_public_key())),
-            vec![GroupActionPayload::LeaveGroup(
-                self.group_info
-                    .members()
-                    .get(&public_key_to_id(self.identity_public_key()))
-                    .cloned()
-                    .unwrap_or_default(),
-            )],
+            vec![],
         );
 
         let protected_payload = protected_payload_tbs.sign::<Sha3_256>(self.identity_secret_key)?;
 
+        let proposal = validator.propose_update_key()?;
+
         let mut frame_tbs = FrameTbs::new(
             self.group_info.id(),
-            validator.epoch(),
+            validator.epoch() + 1,
             self.nonce.advance(),
-            Some(GroupOperation::LeaveGroup(validator.node_index().clone())),
+            Some(GroupOperation::KeyUpdate(proposal.changes)),
             vec![],
         );
 
-        let stage_key = validator.stage_key();
-
         let encrypted_protected_payload = encrypt(
-            &stage_key,
+            &proposal.stage_key,
             &protected_payload.encode_to_vec(),
             &frame_tbs.associated_data::<Sha3_256>()?,
         )?;
         frame_tbs.set_protected_payload(encrypted_protected_payload);
 
-        let frame = frame_tbs.prove_schnorr::<Sha3_256>(validator.leaf_key())?;
+        let proof = Proof::ArtProof(get_proof_system().prove(
+            proposal.prover_artefacts,
+            &[proposal.aux_secret_key],
+            &Sha3_256::digest(frame_tbs.encode_to_vec()?),
+        )?);
+        let frame = Frame::new(frame_tbs, proof);
+
+        self.sended_frames
+            .insert(Sha3_256::digest(frame.encode_to_vec()?).into(), ());
 
         Ok(frame)
     }

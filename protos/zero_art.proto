@@ -109,7 +109,7 @@ message GroupOperation {
 		bytes add_member = 2; // branch_changes
 		bytes remove_member = 3; // branch_changes
 		bytes key_update = 4; // branch_changes
-		bytes leave_group = 5; // node_index
+		bytes leave_group = 5; // branch_changes
 		bytes drop_group = 10; // challenge
 		bytes aggregated = 11; // aggregated group operation (combination of add_member, remove_member and key_update operations) 
 	}

@@ -270,14 +270,49 @@ impl KeyedValidator for LinearKeyedValidator {
                 frame.verify_schnorr::<Sha3_256>(owner_public_key)?;
                 Ok((Some(GroupOperation::Init), self.upstream_stk))
             }
-            frame::GroupOperation::LeaveGroup(node_index) => {
-                if is_next_epoch {
-                    return Err(Error::InvalidEpoch);
-                }
+            frame::GroupOperation::LeaveGroup(changes) => {
+                let span = span!(Level::TRACE, "leave_group_frame");
+                let _enter = span.enter();
 
-                let public_key = self.upstream_art.get_node(node_index)?.get_public_key();
-                frame.verify_schnorr::<Sha3_256>(public_key)?;
-                Ok((Some(GroupOperation::LeaveGroup {member_public_key: public_key}), self.upstream_stk))
+                let (verifier_artefacts, public_key) = if is_next_epoch {
+                    let verifier_artefacts = self
+                        .upstream_art
+                        .compute_artefacts_for_verification(changes)?;
+                    trace!(
+                        "Verifier artefacts based on upstream: {:?}",
+                        verifier_artefacts
+                    );
+                    let public_key = self
+                        .upstream_art
+                        .get_node(&changes.node_index)?
+                        .get_public_key();
+                    trace!("Upstream member leaf key: {:?}", public_key);
+                    (verifier_artefacts, public_key)
+                } else {
+                    let verifier_artefacts =
+                        self.base_art.compute_artefacts_for_verification(changes)?;
+                    trace!("Verifier artefacts based on base: {:?}", verifier_artefacts);
+                    let public_key = self
+                        .base_art
+                        .get_node(&changes.node_index)?
+                        .get_public_key();
+                    trace!("Base member leaf key: {:?}", public_key);
+                    (verifier_artefacts, public_key)
+                };
+
+                frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
+                let operation = GroupOperation::LeaveGroup {
+                    old_public_key: public_key,
+                    new_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
+                };
+
+                let stage_key = if is_next_epoch {
+                    self.apply_changes(changes)?
+                } else {
+                    self.merge_changes(changes)?
+                };
+
+                Ok((Some(operation), stage_key))
             }
             frame::GroupOperation::DropGroup(_) => unimplemented!(),
         }

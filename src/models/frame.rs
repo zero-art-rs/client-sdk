@@ -5,7 +5,7 @@ use cortado::{self, CortadoAffine, Fr as ScalarField};
 use prost::Message;
 use sha3::Digest;
 use zrt_art::types::{
-    BranchChanges, BranchChangesType, NodeIndex, ProverArtefacts, PublicART, VerifierArtefacts,
+    BranchChanges, BranchChangesType, ProverArtefacts, PublicART, VerifierArtefacts,
 };
 use zrt_crypto::schnorr;
 
@@ -293,7 +293,7 @@ pub enum GroupOperation {
     AddMember(BranchChanges<CortadoAffine>),
     RemoveMember(BranchChanges<CortadoAffine>),
     KeyUpdate(BranchChanges<CortadoAffine>),
-    LeaveGroup(NodeIndex),
+    LeaveGroup(BranchChanges<CortadoAffine>),
     DropGroup(Vec<u8>),
 }
 
@@ -324,8 +324,8 @@ impl TryFrom<zero_art_proto::GroupOperation> for GroupOperation {
             zero_art_proto::group_operation::Operation::KeyUpdate(changes) => {
                 GroupOperation::KeyUpdate(BranchChanges::deserialize(&changes)?)
             }
-            zero_art_proto::group_operation::Operation::LeaveGroup(node_index) => {
-                GroupOperation::LeaveGroup(postcard::from_bytes(&node_index)?)
+            zero_art_proto::group_operation::Operation::LeaveGroup(changes) => {
+                GroupOperation::LeaveGroup(BranchChanges::deserialize(&changes)?)
             }
             zero_art_proto::group_operation::Operation::DropGroup(challenge) => {
                 GroupOperation::DropGroup(challenge)
@@ -354,10 +354,8 @@ impl TryFrom<GroupOperation> for zero_art_proto::GroupOperation {
             GroupOperation::KeyUpdate(changes) => {
                 zero_art_proto::group_operation::Operation::KeyUpdate(changes.serialize()?)
             }
-            GroupOperation::LeaveGroup(node_index) => {
-                zero_art_proto::group_operation::Operation::LeaveGroup(postcard::to_allocvec(
-                    &node_index,
-                )?)
+            GroupOperation::LeaveGroup(changes) => {
+                zero_art_proto::group_operation::Operation::LeaveGroup(changes.serialize()?)
             }
             GroupOperation::DropGroup(challenge) => {
                 zero_art_proto::group_operation::Operation::DropGroup(challenge)

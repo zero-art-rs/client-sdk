@@ -7,7 +7,8 @@ use zrt_art::types::{BranchChanges, ProverArtefacts};
 pub enum GroupOperation<G: AffineRepr + CanonicalSerialize + CanonicalDeserialize> {
     Init,
     LeaveGroup {
-        member_public_key: G,
+        old_public_key: G,
+        new_public_key: G,
     },
     DropGroup,
     AddMember {
