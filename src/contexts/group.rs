@@ -21,7 +21,7 @@ use crate::{
     models::{
         self,
         frame::{Frame, FrameTbs, GroupOperation, Proof},
-        group_info::{public_key_to_id, GroupInfo, Role, Status, User},
+        group_info::{GroupInfo, Role, Status, User, public_key_to_id},
         invite::{Invite, InviteTbs, Invitee, ProtectedInviteData},
         payload::GroupActionPayload,
         protected_payload::{ProtectedPayload, ProtectedPayloadTbs, Sender},
@@ -166,16 +166,21 @@ impl GroupContext {
         }
     }
 
-    #[instrument(skip_all)]
     pub fn process_frame(&mut self, frame: Frame) -> Result<(Vec<u8>, bool)> {
-        info!("Start process frame");
-
         let frame_id = Sha3_256::digest(frame.encode_to_vec()?);
-        debug!("Frame to be processed: {:?}", frame_id);
 
         let mut validator = self.validator.lock().unwrap();
 
-        debug!("Start frame validation");
+        let span = span!(
+            Level::DEBUG,
+            "process_frame",
+            current_epoch = ?validator.epoch(),
+            epoch = frame.frame_tbs().epoch(),
+            group_id = ?self.group_info.id(),
+            frame_id = ?frame_id
+        );
+        let _enter = span.enter();
+
         let (operation, stage_key) = validator.validate_and_derive_key(&frame)?;
         trace!("Stage key: {:?}", stage_key);
 
@@ -222,6 +227,8 @@ impl GroupContext {
                         user_to_update.picture = user.picture.clone();
                     }
                     models::payload::GroupActionPayload::ChangeGroup(group_info) => {
+                        debug!("Group name: {:?}", group_info.name);
+                        debug!("Group picture{:?}", group_info.picture);
                         self.group_info.name = group_info.name.clone();
                         self.group_info.picture = group_info.picture.clone();
                     }
@@ -233,7 +240,10 @@ impl GroupContext {
                 return Ok((vec![], true));
             }
 
-            return Ok((protected_payload.protected_payload_tbs().content().to_vec(), verified));
+            return Ok((
+                protected_payload.protected_payload_tbs().content().to_vec(),
+                verified,
+            ));
         };
 
         let mut verified = false;
@@ -325,7 +335,9 @@ impl GroupContext {
                             _ => None,
                         });
 
-                    if let Some(mut user) = user && matches!(user.status, Status::Invited) {
+                    if let Some(mut user) = user
+                        && matches!(user.status, Status::Invited)
+                    {
                         user.status = Status::Active;
 
                         self.group_info
@@ -369,17 +381,24 @@ impl GroupContext {
                         .remove_by_leaf(&member_public_key);
                 }
 
-                if let Some(user_id) = self.group_info.members().get_id(&member_public_key).cloned() {
+                if let Some(user_id) = self
+                    .group_info
+                    .members()
+                    .get_id(&member_public_key)
+                    .cloned()
+                {
                     let user = self.group_info.members_mut().get_mut(&user_id).unwrap();
                     user.status = Status::PendingRemoval
                 }
-                
 
                 trace!("Group state: {:?}", self.group_info);
 
                 sender_public_key
             }
-            types::GroupOperation::LeaveGroup { old_public_key, new_public_key } => {
+            types::GroupOperation::LeaveGroup {
+                old_public_key,
+                new_public_key,
+            } => {
                 let sender_public_key = match protected_payload.protected_payload_tbs().sender() {
                     Sender::UserId(user_id) => self
                         .group_info
@@ -404,7 +423,11 @@ impl GroupContext {
                 let user_id = self.group_info.members().get_id(&old_public_key).cloned();
 
                 if let Some(user_id) = user_id {
-                    self.group_info.members_mut().get_mut(&user_id).unwrap().status = Status::Left
+                    self.group_info
+                        .members_mut()
+                        .get_mut(&user_id)
+                        .unwrap()
+                        .status = Status::Left
                 }
 
                 self.group_info
@@ -412,15 +435,39 @@ impl GroupContext {
                     .update_leaf(old_public_key, new_public_key);
 
                 sender_public_key
-            },
+            }
             _ => CortadoAffine::identity(),
         };
+
+        for action in protected_payload.protected_payload_tbs().group_actions() {
+            match action {
+                models::payload::GroupActionPayload::ChangeUser(user) => {
+                    let Some(user_to_update) = self.group_info.members_mut().get_mut(user.id())
+                    else {
+                        break;
+                    };
+
+                    user_to_update.name = user.name.clone();
+                    user_to_update.picture = user.picture.clone();
+                }
+                models::payload::GroupActionPayload::ChangeGroup(group_info) => {
+                    debug!("Group name: {:?}", group_info.name);
+                    debug!("Group picture{:?}", group_info.picture);
+                    self.group_info.name = group_info.name.clone();
+                    self.group_info.picture = group_info.picture.clone();
+                }
+                _ => {}
+            }
+        }
 
         if self.identity_public_key() == sender_public_key {
             return Ok((vec![], true));
         }
 
-        Ok((protected_payload.protected_payload_tbs().content().to_vec(), verified))
+        Ok((
+            protected_payload.protected_payload_tbs().content().to_vec(),
+            verified,
+        ))
     }
 
     #[instrument(skip_all)]
@@ -650,7 +697,7 @@ impl GroupContext {
 
         let protected_payload = protected_payload_tbs.sign::<Sha3_256>(self.identity_secret_key)?;
 
-        let proposal = validator.propose_update_key()?;
+        let proposal = validator.propose_leave_group()?;
 
         let mut frame_tbs = FrameTbs::new(
             self.group_info.id(),

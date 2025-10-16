@@ -19,8 +19,7 @@ use crate::{
     errors::{Error, Result},
     models::frame,
     types::{
-        AddMemberProposal, ChangesID, GroupOperation, RemoveMemberProposal, StageKey,
-        UpdateKeyProposal, ValidationResult, ValidationWithKeyResult,
+        AddMemberProposal, ChangesID, GroupOperation, LeaveGroupProposal, RemoveMemberProposal, StageKey, UpdateKeyProposal, ValidationResult, ValidationWithKeyResult
     },
     utils::{compute_changes_id, derive_leaf_key, derive_stage_key, deserialize},
 };
@@ -71,7 +70,7 @@ impl Validator for LinearKeyedValidator {
 }
 
 impl KeyedValidator for LinearKeyedValidator {
-    #[instrument(skip_all)]
+    #[instrument(skip_all, name = "validate", fields(current_epoch = %self.epoch, frame_epoch = %frame.frame_tbs().epoch()))]
     fn validate_and_derive_key(&mut self, frame: &frame::Frame) -> Result<ValidationWithKeyResult> {
         trace!("Frame: {:?}", frame);
 
@@ -373,6 +372,24 @@ impl KeyedValidator for LinearKeyedValidator {
         self.participation_leafs.insert(changes_id, secret_key);
 
         Ok(UpdateKeyProposal {
+            changes,
+            stage_key,
+            prover_artefacts,
+            aux_secret_key: self.upstream_art.secret_key,
+        })
+    }
+
+    fn propose_leave_group(&mut self) -> Result<UpdateKeyProposal> {
+        let secret_key = derive_leaf_key(&self.upstream_stk, self.upstream_art.secret_key)?;
+
+        let mut temporary_art = self.upstream_art.clone();
+        let (tree_key, changes, prover_artefacts) = temporary_art.leave(secret_key)?;
+        let stage_key = derive_stage_key(&self.upstream_stk, tree_key.key)?;
+
+        let changes_id = compute_changes_id(&changes)?;
+        self.participation_leafs.insert(changes_id, secret_key);
+
+        Ok(LeaveGroupProposal {
             changes,
             stage_key,
             prover_artefacts,

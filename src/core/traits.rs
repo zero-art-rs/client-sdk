@@ -2,8 +2,7 @@ use crate::{
     errors::Result,
     models::frame::Frame,
     types::{
-        AddMemberProposal, RemoveMemberProposal, StageKey, UpdateKeyProposal, ValidationResult,
-        ValidationWithKeyResult,
+        AddMemberProposal, LeaveGroupProposal, RemoveMemberProposal, StageKey, UpdateKeyProposal, ValidationResult, ValidationWithKeyResult
     },
 };
 
@@ -28,6 +27,7 @@ pub trait KeyedValidator: Validator {
     ) -> Result<RemoveMemberProposal>;
     // TODO: Migrate to immutable ref
     fn propose_update_key(&mut self) -> Result<UpdateKeyProposal>;
+    fn propose_leave_group(&mut self) -> Result<LeaveGroupProposal>;
 
     fn sign_with_tree_key(&self, message: &[u8]) -> Result<Vec<u8>>;
     fn sign_with_leaf_key(&self, message: &[u8]) -> Result<Vec<u8>>;

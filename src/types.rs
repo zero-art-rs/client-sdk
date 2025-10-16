@@ -34,6 +34,7 @@ pub struct Proposal<G: AffineRepr + CanonicalSerialize + CanonicalDeserialize> {
 pub type AddMemberProposal = Proposal<CortadoAffine>;
 pub type RemoveMemberProposal = Proposal<CortadoAffine>;
 pub type UpdateKeyProposal = Proposal<CortadoAffine>;
+pub type LeaveGroupProposal = Proposal<CortadoAffine>;
 pub type ValidationResult = Option<GroupOperation<CortadoAffine>>;
 pub type ValidationWithKeyResult = (ValidationResult, StageKey);
 

@@ -208,7 +208,7 @@ impl LinearKeyedValidator {
         trace!("Resulted upstream stage key: {:?}", self.upstream_stk);
         trace!("Resulted base ART: {:?}", self.base_art);
         trace!("Resulted upstream ART: {:?}", self.upstream_art);
-        trace!("Resulted epoch: {}", self.epoch);
+        info!("Epoch advanced to: {}", self.epoch);
 
         info!("End apply changes");
 
