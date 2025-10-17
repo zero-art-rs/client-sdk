@@ -90,6 +90,7 @@ impl GroupContext {
         trace!(art = ?base_art, stage_key = ?base_stk, "Intitialize ART and stage key");
 
         user.role = Role::Ownership;
+        user.status = Status::Active;
         *user.leaf_key_mut() = leaf_key;
 
         group_info.members_mut().insert(leaf_key, user);
