@@ -38,12 +38,7 @@ impl InviteContext {
         trace!("SPK secret key: {:?}", spk_secret_key);
         trace!("Invitee: {:?}", invite.invite_tbs().invitee());
 
-        println!("Identity secret key: {:?}", identity_secret_key);
-        println!("SPK secret key: {:?}", spk_secret_key);
-        println!("Invitee: {:?}", invite.invite_tbs().invitee());
-
         trace!("Invite signature: {:?}", invite.signature());
-        println!("Invite signature: {:?}", invite.signature());
         invite.verify::<Sha3_256>(invite.invite_tbs().inviter_public_key())?;
         debug!("Invite signature verified");
 
@@ -51,9 +46,6 @@ impl InviteContext {
         let ephemeral_public_key = invite.invite_tbs().ephemeral_public_key();
         trace!("Inviter public key: {:?}", inviter_public_key);
         trace!("Ephemeral public key: {:?}", ephemeral_public_key);
-
-        println!("Inviter public key: {:?}", inviter_public_key);
-        println!("Ephemeral public key: {:?}", ephemeral_public_key);
 
         let leaf_secret = compute_invite_leaf_secret(
             invite.invite_tbs().invitee(),
@@ -65,8 +57,6 @@ impl InviteContext {
         debug!("Invite leaf secret computed");
         trace!("Invite leaf secret: {:?}", leaf_secret);
 
-        println!("Invite leaf secret: {:?}", leaf_secret);
-
         let invite_encryption_key = hkdf(
             Some(b"invite-key-derivation"),
             &crate::utils::serialize(leaf_secret)?,
@@ -74,16 +64,12 @@ impl InviteContext {
         debug!("Invite encryption key derived");
         trace!("Invite encryption key: {:?}", invite_encryption_key);
 
-        println!("Invite encryption key: {:?}", invite_encryption_key);
-
         let protected_invite_data = decrypt(
             &invite_encryption_key,
             invite.invite_tbs().protected_invite_data(),
             &[],
         )?;
-        println!("Protected invite data: {:?}", protected_invite_data);
         let protected_invite_data = ProtectedInviteData::decode(&protected_invite_data)?;
-        println!("Protected invite data: {:?}", protected_invite_data);
 
         Ok(Self {
             identity_secret_key,
@@ -156,11 +142,6 @@ fn compute_invite_leaf_secret(
             identity_public_key,
             spk_public_key,
         } => {
-            println!("Identity public key: {:?}", identity_public_key);
-            println!("Owned identity public key: {:?}", owned_identity_public_key);
-            println!("SPK public key: {:?}", spk_public_key);
-            println!("Owned SPK public key: {:?}", owned_spk_public_key);
-
             if identity_public_key != owned_identity_public_key {
                 return Err(Error::InvalidInput);
             }

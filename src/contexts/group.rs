@@ -708,7 +708,7 @@ impl GroupContext {
             self.group_info.id(),
             validator.epoch() + 1,
             self.nonce.advance(),
-            Some(GroupOperation::KeyUpdate(proposal.changes)),
+            Some(GroupOperation::LeaveGroup(proposal.changes)),
             vec![],
         );
 

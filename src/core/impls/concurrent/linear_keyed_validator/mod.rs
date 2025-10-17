@@ -19,7 +19,8 @@ use crate::{
     errors::{Error, Result},
     models::frame,
     types::{
-        AddMemberProposal, ChangesID, GroupOperation, LeaveGroupProposal, RemoveMemberProposal, StageKey, UpdateKeyProposal, ValidationResult, ValidationWithKeyResult
+        AddMemberProposal, ChangesID, GroupOperation, LeaveGroupProposal, RemoveMemberProposal,
+        StageKey, UpdateKeyProposal, ValidationResult, ValidationWithKeyResult,
     },
     utils::{compute_changes_id, derive_leaf_key, derive_stage_key, deserialize},
 };
@@ -353,11 +354,17 @@ impl KeyedValidator for LinearKeyedValidator {
             &vanishing_secret_key,
         )?;
 
+        let secret_key = if leaf.is_active() {
+            self.upstream_art.secret_key
+        } else {
+            self.upstream_art.get_root_key()?.key
+        };
+
         Ok(RemoveMemberProposal {
             changes,
             stage_key: derive_stage_key(&self.upstream_stk, tree_key.key)?,
             prover_artefacts,
-            aux_secret_key: self.upstream_art.secret_key,
+            aux_secret_key: secret_key,
         })
     }
 

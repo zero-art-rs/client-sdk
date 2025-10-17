@@ -2,7 +2,8 @@ use crate::{
     errors::Result,
     models::frame::Frame,
     types::{
-        AddMemberProposal, LeaveGroupProposal, RemoveMemberProposal, StageKey, UpdateKeyProposal, ValidationResult, ValidationWithKeyResult
+        AddMemberProposal, LeaveGroupProposal, RemoveMemberProposal, StageKey, UpdateKeyProposal,
+        ValidationResult, ValidationWithKeyResult,
     },
 };
 

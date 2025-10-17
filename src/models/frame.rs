@@ -303,7 +303,7 @@ impl From<BranchChanges<CortadoAffine>> for GroupOperation {
             BranchChangesType::MakeBlank => GroupOperation::RemoveMember(value),
             BranchChangesType::AppendNode => GroupOperation::AddMember(value),
             BranchChangesType::UpdateKey => GroupOperation::KeyUpdate(value),
-            BranchChangesType::Leave => GroupOperation::LeaveGroup(value)
+            BranchChangesType::Leave => GroupOperation::LeaveGroup(value),
         }
     }
 }
