@@ -400,6 +400,9 @@ impl GroupContext {
                 old_public_key,
                 new_public_key,
             } => {
+                let span = span!(Level::TRACE, "leave_group_operation");
+                let _enter = span.enter();
+
                 let sender_public_key = match protected_payload.protected_payload_tbs().sender() {
                     Sender::UserId(user_id) => self
                         .group_info
@@ -422,6 +425,7 @@ impl GroupContext {
                 }
 
                 let user_id = self.group_info.members().get_id(&old_public_key).cloned();
+                debug!(user_id = ?user_id, public_key = ?old_public_key, "Get user id");
 
                 if let Some(user_id) = user_id {
                     self.group_info
