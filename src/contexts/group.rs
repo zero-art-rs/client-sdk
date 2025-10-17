@@ -353,7 +353,10 @@ impl GroupContext {
 
                 sender_public_key
             }
-            types::GroupOperation::RemoveMember { member_public_key } => {
+            types::GroupOperation::RemoveMember {
+                old_public_key,
+                new_public_key,
+            } => {
                 let span = span!(Level::TRACE, "remove_member_operation");
                 let _enter = span.enter();
 
@@ -375,21 +378,19 @@ impl GroupContext {
                     verified = true
                 }
 
-                trace!("Removed member leaf public key: {:?}", member_public_key);
+                trace!("Removed member leaf public key: {:?}", old_public_key);
                 if sender_public_key == self.identity_public_key() {
                     self.group_info
                         .members_mut()
-                        .remove_by_leaf(&member_public_key);
+                        .remove_by_leaf(&old_public_key);
                 }
 
-                if let Some(user_id) = self
-                    .group_info
-                    .members()
-                    .get_id(&member_public_key)
-                    .cloned()
-                {
+                if let Some(user_id) = self.group_info.members().get_id(&old_public_key).cloned() {
                     let user = self.group_info.members_mut().get_mut(&user_id).unwrap();
-                    user.status = Status::PendingRemoval
+                    user.status = Status::PendingRemoval;
+                    self.group_info
+                        .members_mut()
+                        .update_leaf(old_public_key, new_public_key);
                 }
 
                 trace!("Group state: {:?}", self.group_info);

@@ -19,7 +19,8 @@ pub enum GroupOperation<G: AffineRepr + CanonicalSerialize + CanonicalDeserializ
         new_public_key: G,
     },
     RemoveMember {
-        member_public_key: G,
+        old_public_key: G,
+        new_public_key: G,
     },
 }
 

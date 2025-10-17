@@ -10,6 +10,7 @@ use zrt_art::types::PublicART;
 
 use crate::{
     contexts::{group::GroupContext, invite::InviteContext},
+    errors::Error,
     models::{self, group_info::public_key_to_id},
     utils,
 };
@@ -446,9 +447,13 @@ fn test_remove_member() {
     contexts[0]
         .process_frame(frame.clone())
         .expect("Failed to process frame");
-    contexts[1]
-        .process_frame(frame.clone())
-        .expect_err("Should error");
+    assert!(
+        matches!(
+            contexts[1].process_frame(frame.clone()),
+            Err(Error::UserRemovedFromGroup)
+        ),
+        "Should error"
+    );
     contexts[2]
         .process_frame(frame.clone())
         .expect("Failed to process frame");
@@ -682,6 +687,37 @@ fn test_leave_member() {
     assert_eq!(
         contexts[2].group_info().members().len(),
         4,
+        "After member removing there should be 3 users and 1 pending removal"
+    );
+
+    let frame = contexts[2]
+        .remove_member(&user_id, vec![])
+        .expect("Failed to propose remove member");
+
+    contexts[0]
+        .process_frame(frame.clone())
+        .expect("Failed to process frame");
+    contexts[1]
+        .process_frame(frame.clone())
+        .expect("Should error");
+    contexts[2]
+        .process_frame(frame.clone())
+        .expect("Failed to process frame");
+
+    assert_eq!(
+        contexts[0].group_info().members().len(),
+        4,
+        "After member removing there should be 3 users"
+    );
+
+    assert_eq!(
+        contexts[1].group_info().members().len(),
+        3,
+        "After member removing there should be 3 users and 1 pending removal"
+    );
+    assert_eq!(
+        contexts[2].group_info().members().len(),
+        3,
         "After member removing there should be 3 users and 1 pending removal"
     );
 }

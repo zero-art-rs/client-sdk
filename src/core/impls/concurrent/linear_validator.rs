@@ -130,7 +130,8 @@ impl Validator for LinearValidator {
 
                 frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
                 let operation = GroupOperation::RemoveMember {
-                    member_public_key: public_key,
+                    old_public_key: public_key,
+                    new_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
 
                 self.apply_changes(changes, is_next_epoch)?;

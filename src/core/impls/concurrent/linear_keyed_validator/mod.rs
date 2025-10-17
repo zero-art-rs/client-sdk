@@ -251,7 +251,10 @@ impl KeyedValidator for LinearKeyedValidator {
                         .get_public_key()
                 };
 
-                let operation = GroupOperation::RemoveMember { member_public_key };
+                let operation = GroupOperation::RemoveMember {
+                    old_public_key: member_public_key,
+                    new_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
+                };
 
                 let stage_key = if is_next_epoch {
                     self.apply_changes(changes)?
