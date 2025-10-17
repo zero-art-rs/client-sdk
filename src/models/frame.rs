@@ -99,6 +99,9 @@ impl TryFrom<zero_art_proto::Frame> for Frame {
                 GroupOperation::KeyUpdate(_) => {
                     Proof::ArtProof(crate::utils::deserialize(&value.proof)?)
                 }
+                GroupOperation::LeaveGroup(_) => {
+                    Proof::ArtProof(crate::utils::deserialize(&value.proof)?)
+                }
                 _ => Proof::SchnorrSignature(value.proof),
             }
         } else {
