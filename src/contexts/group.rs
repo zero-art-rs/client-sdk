@@ -167,7 +167,7 @@ impl GroupContext {
         }
     }
 
-    pub fn process_frame(&mut self, frame: Frame) -> Result<(Vec<u8>, bool)> {
+    pub fn process_frame(&mut self, frame: Frame) -> Result<(Vec<u8>, String, bool)> {
         let frame_id = Sha3_256::digest(frame.encode_to_vec()?);
 
         let mut validator = self.validator.lock().unwrap();
@@ -202,6 +202,7 @@ impl GroupContext {
                     .get(user_id)
                     .ok_or(Error::SenderNotInGroup)?
                     .public_key(),
+
                 Sender::LeafId(_) => unimplemented!(),
             };
 
@@ -237,18 +238,19 @@ impl GroupContext {
                 }
             }
 
-            if self.identity_public_key() == sender_public_key {
-                return Ok((vec![], true));
-            }
-
             return Ok((
                 protected_payload.protected_payload_tbs().content().to_vec(),
+                protected_payload
+                    .protected_payload_tbs()
+                    .sender()
+                    .id()
+                    .to_string(),
                 verified,
             ));
         };
 
         let mut verified = false;
-        let sender_public_key = match operation {
+        match operation {
             types::GroupOperation::AddMember { member_public_key } => {
                 if self.group_info.members().is_empty() {
                     let group_info = protected_payload
@@ -296,8 +298,6 @@ impl GroupContext {
                 self.group_info
                     .members_mut()
                     .insert(member_public_key, member);
-
-                sender_public_key
             }
             types::GroupOperation::KeyUpdate {
                 old_public_key,
@@ -350,8 +350,6 @@ impl GroupContext {
                 self.group_info
                     .members_mut()
                     .update_leaf(old_public_key, new_public_key);
-
-                sender_public_key
             }
             types::GroupOperation::RemoveMember {
                 old_public_key,
@@ -394,8 +392,6 @@ impl GroupContext {
                 }
 
                 trace!("Group state: {:?}", self.group_info);
-
-                sender_public_key
             }
             types::GroupOperation::LeaveGroup {
                 old_public_key,
@@ -439,11 +435,9 @@ impl GroupContext {
                 self.group_info
                     .members_mut()
                     .update_leaf(old_public_key, new_public_key);
-
-                sender_public_key
             }
-            _ => CortadoAffine::identity(),
-        };
+            _ => {}
+        }
 
         for action in protected_payload.protected_payload_tbs().group_actions() {
             match action {
@@ -466,12 +460,13 @@ impl GroupContext {
             }
         }
 
-        if self.identity_public_key() == sender_public_key {
-            return Ok((vec![], true));
-        }
-
         Ok((
             protected_payload.protected_payload_tbs().content().to_vec(),
+            protected_payload
+                .protected_payload_tbs()
+                .sender()
+                .id()
+                .to_string(),
             verified,
         ))
     }

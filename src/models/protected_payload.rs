@@ -207,6 +207,15 @@ pub enum Sender {
     LeafId(String),
 }
 
+impl Sender {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::LeafId(id) => id,
+            Self::UserId(id) => id,
+        }
+    }
+}
+
 impl Default for Sender {
     fn default() -> Self {
         Sender::UserId(String::new())
