@@ -7,7 +7,7 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use hkdf::Hkdf;
 use sha3::{Digest, Sha3_256};
-use zrt_art::types::BranchChanges;
+use zrt_art::changes::branch_change::BranchChange;
 use zrt_crypto::x3dh::{x3dh_a, x3dh_b};
 
 use crate::{
@@ -129,6 +129,6 @@ pub fn derive_encryption_key(stage_key: &StageKey) -> Result<StageKey> {
     hkdf(Some(b"encryption-key-derivation"), stage_key)
 }
 
-pub fn compute_changes_id(changes: &BranchChanges<CortadoAffine>) -> Result<ChangesID> {
+pub fn compute_changes_id(changes: &BranchChange<CortadoAffine>) -> Result<ChangesID> {
     Ok(Sha3_256::digest(changes.serialize()?).to_vec()[..8].try_into()?)
 }

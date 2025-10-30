@@ -3,7 +3,6 @@ pub mod contexts;
 pub mod core;
 pub mod errors;
 pub mod models;
-pub mod proof_system;
 pub mod types;
 pub mod utils;
 

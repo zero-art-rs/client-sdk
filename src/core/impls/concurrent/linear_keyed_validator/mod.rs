@@ -4,10 +4,10 @@ use ark_ec::{AffineRepr, CurveGroup};
 use serde::{Deserialize, Serialize};
 use sha3::Sha3_256;
 use tracing::{Level, debug, instrument, span, trace};
-use zrt_art::{
-    traits::{ARTPrivateAPI, ARTPublicAPI, ARTPublicView},
-    types::{BranchChanges, LeafStatus, NodeIndex, PrivateART, PublicART},
-};
+use zrt_art::art::art_node::LeafStatus;
+use zrt_art::art::art_types::{PrivateArt, PublicArt};
+use zrt_art::changes::branch_change::BranchChange;
+use zrt_art::node_index::NodeIndex;
 use zrt_crypto::schnorr;
 
 use crate::{
@@ -31,19 +31,19 @@ mod merge_strategy;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Participant {
     id: ChangesID,
-    branch: BranchChanges<CortadoAffine>,
-    art: PrivateART<CortadoAffine>,
+    branch: BranchChange<CortadoAffine>,
+    art: PrivateArt<CortadoAffine>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LinearKeyedValidator {
-    base_art: PrivateART<CortadoAffine>,
+    base_art: PrivateArt<CortadoAffine>,
     base_stk: StageKey,
 
-    upstream_art: PrivateART<CortadoAffine>,
+    upstream_art: PrivateArt<CortadoAffine>,
     upstream_stk: StageKey,
 
-    changes: HashMap<ChangesID, BranchChanges<CortadoAffine>>,
+    changes: HashMap<ChangesID, BranchChange<CortadoAffine>>,
 
     epoch: u64,
 
@@ -57,8 +57,8 @@ impl Validator for LinearKeyedValidator {
         Ok(result)
     }
 
-    fn tree(&self) -> &PublicART<CortadoAffine> {
-        &self.upstream_art.public_art
+    fn tree(&self) -> &PublicArt<CortadoAffine> {
+        &self.upstream_art.get_public_art()
     }
 
     fn tree_public_key(&self) -> CortadoAffine {
@@ -200,7 +200,7 @@ impl KeyedValidator for LinearKeyedValidator {
                 let span = span!(Level::TRACE, "remove_member_frame");
                 let _enter = span.enter();
 
-                if self.upstream_art.node_index == changes.node_index {
+                if self.upstream_art.get_node_index() == changes.node_index {
                     return Err(Error::UserRemovedFromGroup);
                 }
 
@@ -445,7 +445,7 @@ impl KeyedValidator for LinearKeyedValidator {
 }
 
 impl LinearKeyedValidator {
-    pub fn new(base_art: PrivateART<CortadoAffine>, base_stk: StageKey, epoch: u64) -> Self {
+    pub fn new(base_art: PrivateArt<CortadoAffine>, base_stk: StageKey, epoch: u64) -> Self {
         Self {
             upstream_art: base_art.clone(),
             upstream_stk: base_stk,
@@ -471,7 +471,7 @@ impl LinearKeyedValidator {
     }
 
     pub fn node_index(&self) -> &NodeIndex {
-        &self.upstream_art.node_index
+        &self.upstream_art.get_node_index()
     }
 }
 

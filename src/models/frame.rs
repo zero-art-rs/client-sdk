@@ -4,17 +4,17 @@ use ark_ec::{AffineRepr, CurveGroup};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use prost::Message;
 use sha3::Digest;
-use zrt_art::types::{
-    BranchChanges, BranchChangesType, ProverArtefacts, PublicART, VerifierArtefacts,
-};
+use zrt_art::art::art_types::{PublicArt, PublicZeroArt};
+use zrt_art::changes::branch_change::{BranchChange, BranchChangeType};
+use zrt_art::changes::{VerifiableChange};
 use zrt_crypto::schnorr;
 
 use uuid::Uuid;
-use zrt_zk::art::ARTProof;
+use zrt_zk::EligibilityRequirement;
+use zrt_zk::art::ArtProof;
 
 use crate::{
     errors::{Error, Result},
-    proof_system::get_proof_system,
     zero_art_proto,
 };
 
@@ -55,19 +55,19 @@ impl Frame {
 
     pub fn verify_art<D: Digest>(
         &self,
-        verifier_artefacts: VerifierArtefacts<CortadoAffine>,
-        public_key: CortadoAffine,
+        branch_change: BranchChange<CortadoAffine>,
+        public_zero_art: PublicZeroArt,
+        eligibility_requirement: EligibilityRequirement,
     ) -> Result<()> {
         match &self.proof {
             Proof::SchnorrSignature(_) => return Err(Error::InvalidVerificationMethod),
-            Proof::ArtProof(proof) => get_proof_system().verify(
-                verifier_artefacts,
-                &[public_key],
+            Proof::ArtProof(proof) => branch_change.verify(
+                public_zero_art,
                 &D::digest(self.frame_tbs.encode_to_vec()?),
-                proof.clone(),
+                eligibility_requirement,
+                proof,
             )?,
         }
-
         Ok(())
     }
 
@@ -130,7 +130,7 @@ impl TryFrom<Frame> for zero_art_proto::Frame {
 
 #[derive(Clone)]
 pub enum Proof {
-    ArtProof(ARTProof),
+    ArtProof(ArtProof),
     SchnorrSignature(Vec<u8>),
 }
 
@@ -220,21 +220,21 @@ impl FrameTbs {
         })
     }
 
-    pub fn prove_art<D: Digest>(
-        self,
-        prover_artefacts: ProverArtefacts<CortadoAffine>,
-        secret_key: ScalarField,
-    ) -> Result<Frame> {
-        let proof = get_proof_system().prove(
-            prover_artefacts,
-            &[secret_key],
-            &D::digest(self.encode_to_vec()?),
-        )?;
-        Ok(Frame {
-            frame_tbs: self,
-            proof: Proof::ArtProof(proof),
-        })
-    }
+    // pub fn prove_art<D: Digest>(
+    //     self,
+    //     prover_artefacts: ProverArtefacts<CortadoAffine>,
+    //     secret_key: ScalarField,
+    // ) -> Result<Frame> {
+    //     let proof = get_proof_system().prove(
+    //         prover_artefacts,
+    //         &[secret_key],
+    //         &D::digest(self.encode_to_vec()?),
+    //     )?;
+    //     Ok(Frame {
+    //         frame_tbs: self,
+    //         proof: Proof::ArtProof(proof),
+    //     })
+    // }
 
     // Serialization
     pub fn encode_to_vec(&self) -> Result<Vec<u8>> {
@@ -292,21 +292,21 @@ impl TryFrom<FrameTbs> for zero_art_proto::FrameTbs {
 
 #[derive(Debug, Clone)]
 pub enum GroupOperation {
-    Init(PublicART<CortadoAffine>),
-    AddMember(BranchChanges<CortadoAffine>),
-    RemoveMember(BranchChanges<CortadoAffine>),
-    KeyUpdate(BranchChanges<CortadoAffine>),
-    LeaveGroup(BranchChanges<CortadoAffine>),
+    Init(PublicArt<CortadoAffine>),
+    AddMember(BranchChange<CortadoAffine>),
+    RemoveMember(BranchChange<CortadoAffine>),
+    KeyUpdate(BranchChange<CortadoAffine>),
+    LeaveGroup(BranchChange<CortadoAffine>),
     DropGroup(Vec<u8>),
 }
 
-impl From<BranchChanges<CortadoAffine>> for GroupOperation {
-    fn from(value: BranchChanges<CortadoAffine>) -> Self {
+impl From<BranchChange<CortadoAffine>> for GroupOperation {
+    fn from(value: BranchChange<CortadoAffine>) -> Self {
         match value.change_type {
-            BranchChangesType::MakeBlank => GroupOperation::RemoveMember(value),
-            BranchChangesType::AppendNode => GroupOperation::AddMember(value),
-            BranchChangesType::UpdateKey => GroupOperation::KeyUpdate(value),
-            BranchChangesType::Leave => GroupOperation::LeaveGroup(value),
+            BranchChangeType::MakeBlank => GroupOperation::RemoveMember(value),
+            BranchChangeType::AppendNode => GroupOperation::AddMember(value),
+            BranchChangeType::UpdateKey => GroupOperation::KeyUpdate(value),
+            BranchChangeType::Leave => GroupOperation::LeaveGroup(value),
         }
     }
 }
@@ -317,19 +317,19 @@ impl TryFrom<zero_art_proto::GroupOperation> for GroupOperation {
     fn try_from(value: zero_art_proto::GroupOperation) -> Result<Self> {
         let group_operation = match value.operation.ok_or(Error::RequiredFieldAbsent)? {
             zero_art_proto::group_operation::Operation::Init(art) => {
-                GroupOperation::Init(PublicART::deserialize(&art)?)
+                GroupOperation::Init(PublicArt::deserialize(&art)?)
             }
             zero_art_proto::group_operation::Operation::AddMember(changes) => {
-                GroupOperation::AddMember(BranchChanges::deserialize(&changes)?)
+                GroupOperation::AddMember(BranchChange::deserialize(&changes)?)
             }
             zero_art_proto::group_operation::Operation::RemoveMember(changes) => {
-                GroupOperation::RemoveMember(BranchChanges::deserialize(&changes)?)
+                GroupOperation::RemoveMember(BranchChange::deserialize(&changes)?)
             }
             zero_art_proto::group_operation::Operation::KeyUpdate(changes) => {
-                GroupOperation::KeyUpdate(BranchChanges::deserialize(&changes)?)
+                GroupOperation::KeyUpdate(BranchChange::deserialize(&changes)?)
             }
             zero_art_proto::group_operation::Operation::LeaveGroup(changes) => {
-                GroupOperation::LeaveGroup(BranchChanges::deserialize(&changes)?)
+                GroupOperation::LeaveGroup(BranchChange::deserialize(&changes)?)
             }
             zero_art_proto::group_operation::Operation::DropGroup(challenge) => {
                 GroupOperation::DropGroup(challenge)

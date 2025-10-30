@@ -8,12 +8,12 @@ use crate::{
 };
 
 use cortado::{self, CortadoAffine, Fr as ScalarField};
-use zrt_art::types::PublicART;
+use zrt_art::art::art_types::PublicArt;
 
 pub trait Validator {
     fn validate(&mut self, frame: &Frame) -> Result<ValidationResult>;
 
-    fn tree(&self) -> &PublicART<CortadoAffine>;
+    fn tree(&self) -> &PublicArt<CortadoAffine>;
     fn tree_public_key(&self) -> CortadoAffine;
     fn epoch(&self) -> u64;
 }

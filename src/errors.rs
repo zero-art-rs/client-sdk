@@ -2,12 +2,12 @@ use ark_serialize::SerializationError;
 use bulletproofs::r1cs::R1CSError;
 use prost::{DecodeError, UnknownEnumValue};
 use thiserror::Error;
-use zrt_art::errors::ARTError;
+use zrt_art::errors::ArtError;
 
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("ART error")]
-    ArtError(#[from] ARTError),
+    ArtError(#[from] ArtError),
     #[error("Serialization error")]
     SerializationError(#[from] SerializationError),
     #[error("Cryptography error")]

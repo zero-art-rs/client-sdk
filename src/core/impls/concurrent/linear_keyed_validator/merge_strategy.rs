@@ -9,13 +9,16 @@ use crate::{
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use sha3::{Digest, Sha3_256};
 use tracing::{debug, info, instrument, trace, warn};
-use zrt_art::{traits::ARTPrivateAPI, types::BranchChanges};
+use zrt_art::changes::{
+    ApplicableChange,
+    branch_change::{BranchChange, MergeBranchChange},
+};
 
 impl LinearKeyedValidator {
     pub(super) fn merge_changes_and_participate(
         &mut self,
         changes_id: ChangesID,
-        changes: BranchChanges<CortadoAffine>,
+        changes: BranchChange<CortadoAffine>,
         secret_key: ScalarField,
     ) -> Result<StageKey> {
         let mut upstream_art = self.base_art.clone();
@@ -29,15 +32,17 @@ impl LinearKeyedValidator {
             art: upstream_art.clone(),
         };
 
-        upstream_art.merge_for_participant(
+        let merge_branch_change = MergeBranchChange::new_for_participant(
+            self.base_art.clone(),
             changes.clone(),
             &self
                 .changes
                 .values()
                 .cloned()
-                .collect::<Vec<BranchChanges<CortadoAffine>>>(),
-            self.base_art.clone(),
-        )?;
+                .collect::<Vec<BranchChange<CortadoAffine>>>(),
+        );
+        merge_branch_change.update(&mut upstream_art)?;
+
         let upstream_stk = derive_stage_key(&self.base_stk, upstream_art.get_root_key()?.key)?;
         trace!("Upstream stage key: {:?}", upstream_stk);
 
@@ -60,7 +65,7 @@ impl LinearKeyedValidator {
     #[instrument(skip_all)]
     pub(super) fn merge_changes(
         &mut self,
-        changes: &BranchChanges<CortadoAffine>,
+        changes: &BranchChange<CortadoAffine>,
     ) -> Result<StageKey> {
         info!("Start merge changes");
 
@@ -104,23 +109,28 @@ impl LinearKeyedValidator {
                 .chain(std::iter::once(changes.clone()))
                 .collect::<Vec<_>>();
 
-            upstream_art.merge_for_participant(
+            let merge_branch_change = MergeBranchChange::new_for_participant(
+                self.base_art.clone(),
                 participant.branch.clone(),
                 &target_changes,
-                self.base_art.clone(),
-            )?;
+            );
+
+            merge_branch_change.update(&mut upstream_art)?;
 
             upstream_art
         } else {
             let mut upstream_art = self.base_art.clone();
-            upstream_art.merge_for_observer(
+
+            let merge_branch_change = MergeBranchChange::new_for_observer(
                 &self
                     .changes
                     .clone()
                     .into_values()
                     .chain(once(changes.clone()))
                     .collect::<Vec<_>>(),
-            )?;
+            );
+
+            merge_branch_change.update(&mut upstream_art)?;
 
             upstream_art
         };
@@ -147,7 +157,7 @@ impl LinearKeyedValidator {
     #[instrument(skip_all)]
     pub(super) fn apply_changes(
         &mut self,
-        changes: &BranchChanges<CortadoAffine>,
+        changes: &BranchChange<CortadoAffine>,
     ) -> Result<StageKey> {
         info!("Start apply changes");
 

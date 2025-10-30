@@ -2,11 +2,10 @@ use ark_ff::UniformRand;
 use ark_std::rand::{SeedableRng, rngs::StdRng};
 use sha3::Digest;
 use uuid::Uuid;
-use zrt_art::types::LeafIter;
+use zrt_art::art::art_node::LeafIter;
 
 use crate::{
     models::frame,
-    proof_system::get_proof_system,
     types::{Proposal, StageKey},
     utils::encrypt,
 };
