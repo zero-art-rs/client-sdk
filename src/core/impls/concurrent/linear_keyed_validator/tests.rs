@@ -2,10 +2,10 @@ use ark_ff::UniformRand;
 use ark_std::rand::{SeedableRng, rngs::StdRng};
 use sha3::Digest;
 use uuid::Uuid;
-use zrt_art::art::art_node::LeafIter;
+use zrt_art::{art::art_node::LeafIter, changes::ProvableChange};
 
 use crate::{
-    models::frame,
+    models::frame::{self, Proof},
     types::{Proposal, StageKey},
     utils::encrypt,
 };
@@ -28,7 +28,7 @@ impl Nonce {
 }
 
 fn frame_from_proposal(
-    proposal: Proposal<CortadoAffine>,
+    mut proposal: Proposal<CortadoAffine>,
     epoch: u64,
     payload: &[u8],
 ) -> frame::Frame {
@@ -36,7 +36,7 @@ fn frame_from_proposal(
         Uuid::new_v4(),
         epoch,
         vec![],
-        Some(proposal.changes.into()),
+        Some(proposal.change.get_branch_change().clone().into()),
         encrypt(&proposal.stage_key, payload, b"").expect("Failed to encrypt payload"),
     );
     let frame_aad = Sha3_256::digest(
@@ -44,18 +44,17 @@ fn frame_from_proposal(
             .encode_to_vec()
             .expect("Failed to encode frame tbs"),
     );
-    frame::Frame::new(
-        frame_tbs,
-        frame::Proof::ArtProof(
-            get_proof_system()
-                .prove(
-                    proposal.prover_artefacts,
-                    &[proposal.aux_secret_key],
-                    &frame_aad,
-                )
-                .expect("Failed to prove frame"),
-        ),
-    )
+
+    let proof = Proof::ArtProof(
+        ProvableChange::prove(
+            &proposal.change,
+            &mut proposal.private_zero_art,
+            &frame_aad,
+            None,
+        )
+        .expect("Failed to prove frame"),
+    );
+    frame::Frame::new(frame_tbs, proof)
 }
 
 #[test]
@@ -64,10 +63,8 @@ fn test_sequential_invite_members() {
 
     // Create Private ART
     let leaf_secret = ScalarField::rand(&mut rng);
-    let (base_art, tree_key) =
-        PrivateART::new_art_from_secrets(&vec![leaf_secret], &CortadoAffine::generator())
-            .expect("Failed to create art from secret");
-    let base_stk = derive_stage_key(&StageKey::default(), tree_key.key)
+    let base_art = PrivateArt::setup(&vec![leaf_secret]).expect("Failed to create art from secret");
+    let base_stk = derive_stage_key(&StageKey::default(), base_art.get_root_secret_key())
         .expect("Failed to derive base stage key");
 
     // Create KeyedValidator
@@ -107,10 +104,9 @@ fn test_sequential_invite_members_with_observer() {
     let mut rng = StdRng::seed_from_u64(0);
 
     let owner_leaf_secret = ScalarField::rand(&mut rng);
-    let (base_art, tree_key) =
-        PrivateART::new_art_from_secrets(&vec![owner_leaf_secret], &CortadoAffine::generator())
-            .expect("Failed to create art from secret");
-    let base_stk = derive_stage_key(&StageKey::default(), tree_key.key)
+    let base_art =
+        PrivateArt::setup(&vec![owner_leaf_secret]).expect("Failed to create art from secret");
+    let base_stk = derive_stage_key(&StageKey::default(), base_art.get_root_secret_key())
         .expect("Failed to derive base stage key");
 
     let mut owner_keyed_validator = LinearKeyedValidator::new(base_art, base_stk, 0);
@@ -125,8 +121,8 @@ fn test_sequential_invite_members_with_observer() {
         .validate_and_derive_key(&frame)
         .expect("Failed to validate add observer frame");
 
-    let observer_art = PrivateART::from_public_art_and_secret(
-        owner_keyed_validator.upstream_art.public_art.clone(),
+    let observer_art = PrivateArt::new(
+        owner_keyed_validator.upstream_art.get_public_art().clone(),
         observer_leaf_secret,
     )
     .expect("Failed to create observer art");
@@ -188,10 +184,9 @@ fn test_sequential_cross_key_updates() {
     let mut rng = StdRng::seed_from_u64(0);
 
     let owner_leaf_secret = ScalarField::rand(&mut rng);
-    let (base_art, tree_key) =
-        PrivateART::new_art_from_secrets(&vec![owner_leaf_secret], &CortadoAffine::generator())
-            .expect("Failed to create art from secret");
-    let base_stk = derive_stage_key(&StageKey::default(), tree_key.key)
+    let base_art =
+        PrivateArt::setup(&vec![owner_leaf_secret]).expect("Failed to create art from secret");
+    let base_stk = derive_stage_key(&StageKey::default(), base_art.get_root_secret_key())
         .expect("Failed to derive base stage key");
 
     let mut owner_keyed_validator = LinearKeyedValidator::new(base_art, base_stk, 0);
@@ -206,8 +201,8 @@ fn test_sequential_cross_key_updates() {
         .validate_and_derive_key(&frame)
         .expect("Failed to validate add observer frame");
 
-    let observer_art = PrivateART::from_public_art_and_secret(
-        owner_keyed_validator.upstream_art.public_art.clone(),
+    let observer_art = PrivateArt::new(
+        owner_keyed_validator.upstream_art.get_public_art().clone(),
         observer_leaf_secret,
     )
     .expect("Failed to create observer art");
@@ -280,10 +275,9 @@ fn test_concurrent_key_updates() {
 
     let owner_leaf_secret = ScalarField::rand(&mut rng);
 
-    let (base_art, tree_key) =
-        PrivateART::new_art_from_secrets(&vec![owner_leaf_secret], &CortadoAffine::generator())
-            .expect("Failed to create art from secret");
-    let base_stk = derive_stage_key(&StageKey::default(), tree_key.key)
+    let base_art =
+        PrivateArt::setup(&vec![owner_leaf_secret]).expect("Failed to create art from secret");
+    let base_stk = derive_stage_key(&StageKey::default(), base_art.get_root_secret_key())
         .expect("Failed to derive base stage key");
 
     let mut owner_keyed_validator = LinearKeyedValidator::new(base_art, base_stk, 0);
@@ -298,8 +292,8 @@ fn test_concurrent_key_updates() {
         .validate_and_derive_key(&frame)
         .expect("Failed to validate add observer frame");
 
-    let participant_art = PrivateART::from_public_art_and_secret(
-        owner_keyed_validator.upstream_art.public_art.clone(),
+    let participant_art = PrivateArt::new(
+        owner_keyed_validator.upstream_art.get_public_art().clone(),
         participant_leaf_secret,
     )
     .expect("Failed to create participant art");
@@ -319,8 +313,8 @@ fn test_concurrent_key_updates() {
         .validate_and_derive_key(&frame)
         .expect("Failed to validate particiapnt");
 
-    let observer_art = PrivateART::from_public_art_and_secret(
-        owner_keyed_validator.upstream_art.public_art.clone(),
+    let observer_art = PrivateArt::new(
+        owner_keyed_validator.upstream_art.get_public_art().clone(),
         observer_leaf_secret,
     )
     .expect("Failed to create observer art");
@@ -405,10 +399,9 @@ fn test_create_validator2() {
 
     let leaf_secret_0_0 = ScalarField::rand(&mut rng);
 
-    let (base_art, tree_key) =
-        PrivateART::new_art_from_secrets(&vec![leaf_secret_0_0], &CortadoAffine::generator())
-            .expect("Failed to create art from secret");
-    let base_stk = derive_stage_key(&StageKey::default(), tree_key.key)
+    let base_art =
+        PrivateArt::setup(&vec![leaf_secret_0_0]).expect("Failed to create art from secret");
+    let base_stk = derive_stage_key(&StageKey::default(), base_art.get_root_secret_key())
         .expect("Failed to derive base stage key");
 
     let mut keyed_validator_0 = LinearKeyedValidator::new(base_art, base_stk, 0);
@@ -416,7 +409,7 @@ fn test_create_validator2() {
     // Member 1
     let leaf_secret_1_0 = ScalarField::rand(&mut rng);
 
-    let proposal = keyed_validator_0
+    let mut proposal = keyed_validator_0
         .propose_add_member(leaf_secret_1_0)
         .expect("Failed to predict add member");
 
@@ -425,7 +418,9 @@ fn test_create_validator2() {
         group_id,
         1,
         nonce.next(),
-        Some(frame::GroupOperation::AddMember(proposal.changes)),
+        Some(frame::GroupOperation::AddMember(
+            proposal.change.get_branch_change().clone().into(),
+        )),
         encrypt(&proposal.stage_key, b"Hello world!", b"").expect("Failed to encrypt payload"),
     );
     let frame_0_aad = Sha3_256::digest(
@@ -433,26 +428,26 @@ fn test_create_validator2() {
             .encode_to_vec()
             .expect("Failed to encode frame 0 tbs"),
     );
-    let frame_0 = frame::Frame::new(
-        frame_0_tbs,
-        frame::Proof::ArtProof(
-            get_proof_system()
-                .prove(
-                    proposal.prover_artefacts,
-                    &[proposal.aux_secret_key],
-                    &frame_0_aad,
-                )
-                .expect("Failed to prove frame 0"),
-        ),
+
+    let proof = Proof::ArtProof(
+        ProvableChange::prove(
+            &proposal.change,
+            &mut proposal.private_zero_art,
+            &frame_0_aad,
+            None,
+        )
+        .expect("Failed to prove frame"),
     );
+
+    let frame_0 = frame::Frame::new(frame_0_tbs, proof);
 
     // Frame validation
     let _ = keyed_validator_0
         .validate(&frame_0)
         .expect("Failed to validate frame 0");
 
-    let upstream_art: PrivateART<CortadoAffine> =
-        PrivateART::from_public_art_and_secret(keyed_validator_0.tree().clone(), leaf_secret_1_0)
+    let upstream_art: PrivateArt<CortadoAffine> =
+        PrivateArt::new(keyed_validator_0.tree().clone(), leaf_secret_1_0)
             .expect("Failed to create base/upstream art for another member");
     let mut keyed_validator_1 = LinearKeyedValidator::new(
         upstream_art,
@@ -463,7 +458,7 @@ fn test_create_validator2() {
     // Member 2
     let leaf_secret_2_0 = ScalarField::rand(&mut rng);
 
-    let proposal = keyed_validator_0
+    let mut proposal = keyed_validator_0
         .propose_add_member(leaf_secret_2_0)
         .expect("Failed to predict add member");
 
@@ -472,7 +467,9 @@ fn test_create_validator2() {
         group_id,
         2,
         nonce.next(),
-        Some(frame::GroupOperation::AddMember(proposal.changes)),
+        Some(frame::GroupOperation::AddMember(
+            proposal.change.get_branch_change().clone().into(),
+        )),
         encrypt(&proposal.stage_key, b"Hello world!", b"").expect("Failed to encrypt payload"),
     );
     let frame_1_aad = Sha3_256::digest(
@@ -480,18 +477,17 @@ fn test_create_validator2() {
             .encode_to_vec()
             .expect("Failed to encode frame 0 tbs"),
     );
-    let frame_1 = frame::Frame::new(
-        frame_1_tbs,
-        frame::Proof::ArtProof(
-            get_proof_system()
-                .prove(
-                    proposal.prover_artefacts,
-                    &[proposal.aux_secret_key],
-                    &frame_1_aad,
-                )
-                .expect("Failed to prove frame 0"),
-        ),
+    let proof = Proof::ArtProof(
+        ProvableChange::prove(
+            &proposal.change,
+            &mut proposal.private_zero_art,
+            &frame_1_aad,
+            None,
+        )
+        .expect("Failed to prove frame"),
     );
+
+    let frame_1 = frame::Frame::new(frame_1_tbs, proof);
 
     // Frame validation
     let _ = keyed_validator_0
@@ -512,7 +508,7 @@ fn test_create_validator2() {
         "Validator upstream stk mismatch"
     );
 
-    let proposal = keyed_validator_0
+    let mut proposal = keyed_validator_0
         .propose_update_key()
         .expect("Failed to predict update key");
 
@@ -521,7 +517,9 @@ fn test_create_validator2() {
         group_id,
         3,
         nonce.next(),
-        Some(frame::GroupOperation::KeyUpdate(proposal.changes)),
+        Some(frame::GroupOperation::KeyUpdate(
+            proposal.change.get_branch_change().clone().into(),
+        )),
         encrypt(&proposal.stage_key, b"Hello world!", b"").expect("Failed to encrypt payload"),
     );
     let frame_2_aad = Sha3_256::digest(
@@ -529,18 +527,18 @@ fn test_create_validator2() {
             .encode_to_vec()
             .expect("Failed to encode frame 0 tbs"),
     );
-    let frame_2 = frame::Frame::new(
-        frame_2_tbs,
-        frame::Proof::ArtProof(
-            get_proof_system()
-                .prove(
-                    proposal.prover_artefacts,
-                    &[proposal.aux_secret_key],
-                    &frame_2_aad,
-                )
-                .expect("Failed to prove frame 0"),
-        ),
+
+    let proof = Proof::ArtProof(
+        ProvableChange::prove(
+            &proposal.change,
+            &mut proposal.private_zero_art,
+            &frame_2_aad,
+            None,
+        )
+        .expect("Failed to prove frame"),
     );
+
+    let frame_2 = frame::Frame::new(frame_2_tbs, proof);
 
     let _ = keyed_validator_0
         .validate(&frame_2)
@@ -568,7 +566,7 @@ fn test_create_validator2() {
         "Validator 1 should not participate in epoch"
     );
 
-    let proposal = keyed_validator_0
+    let mut proposal = keyed_validator_0
         .propose_update_key()
         .expect("Failed to predict update key");
 
@@ -577,7 +575,9 @@ fn test_create_validator2() {
         group_id,
         4,
         nonce.next(),
-        Some(frame::GroupOperation::KeyUpdate(proposal.changes)),
+        Some(frame::GroupOperation::KeyUpdate(
+            proposal.change.get_branch_change().clone().into(),
+        )),
         encrypt(&proposal.stage_key, b"Hello world!", b"").expect("Failed to encrypt payload"),
     );
     let frame_3_aad = Sha3_256::digest(
@@ -585,20 +585,19 @@ fn test_create_validator2() {
             .encode_to_vec()
             .expect("Failed to encode frame 0 tbs"),
     );
-    let frame_3 = frame::Frame::new(
-        frame_3_tbs,
-        frame::Proof::ArtProof(
-            get_proof_system()
-                .prove(
-                    proposal.prover_artefacts,
-                    &[proposal.aux_secret_key],
-                    &frame_3_aad,
-                )
-                .expect("Failed to prove frame 0"),
-        ),
+    let proof = Proof::ArtProof(
+        ProvableChange::prove(
+            &proposal.change,
+            &mut proposal.private_zero_art,
+            &frame_3_aad,
+            None,
+        )
+        .expect("Failed to prove frame"),
     );
 
-    let proposal = keyed_validator_1
+    let frame_3 = frame::Frame::new(frame_3_tbs, proof);
+
+    let mut proposal = keyed_validator_1
         .propose_update_key()
         .expect("Failed to predict update key");
 
@@ -607,7 +606,9 @@ fn test_create_validator2() {
         group_id,
         4,
         nonce.next(),
-        Some(frame::GroupOperation::KeyUpdate(proposal.changes)),
+        Some(frame::GroupOperation::KeyUpdate(
+            proposal.change.get_branch_change().clone().into(),
+        )),
         encrypt(&proposal.stage_key, b"Hello world!", b"").expect("Failed to encrypt payload"),
     );
     let frame_4_aad = Sha3_256::digest(
@@ -615,18 +616,17 @@ fn test_create_validator2() {
             .encode_to_vec()
             .expect("Failed to encode frame 0 tbs"),
     );
-    let frame_4 = frame::Frame::new(
-        frame_4_tbs,
-        frame::Proof::ArtProof(
-            get_proof_system()
-                .prove(
-                    proposal.prover_artefacts,
-                    &[proposal.aux_secret_key],
-                    &frame_4_aad,
-                )
-                .expect("Failed to prove frame 0"),
-        ),
+    let proof = Proof::ArtProof(
+        ProvableChange::prove(
+            &proposal.change,
+            &mut proposal.private_zero_art,
+            &frame_4_aad,
+            None,
+        )
+        .expect("Failed to prove frame"),
     );
+
+    let frame_4 = frame::Frame::new(frame_4_tbs, proof);
 
     let _ = keyed_validator_0
         .validate(&frame_3)
@@ -661,7 +661,7 @@ fn test_create_validator2() {
         "Validator 1 should participate in epoch"
     );
 
-    let proposal = keyed_validator_1
+    let mut proposal = keyed_validator_1
         .propose_update_key()
         .expect("Failed to predict update key");
 
@@ -670,7 +670,9 @@ fn test_create_validator2() {
         group_id,
         5,
         nonce.next(),
-        Some(frame::GroupOperation::KeyUpdate(proposal.changes)),
+        Some(frame::GroupOperation::KeyUpdate(
+            proposal.change.get_branch_change().clone().into(),
+        )),
         encrypt(&proposal.stage_key, b"Hello world!", b"").expect("Failed to encrypt payload"),
     );
     let frame_5_aad = Sha3_256::digest(
@@ -678,18 +680,17 @@ fn test_create_validator2() {
             .encode_to_vec()
             .expect("Failed to encode frame 0 tbs"),
     );
-    let frame_5 = frame::Frame::new(
-        frame_5_tbs,
-        frame::Proof::ArtProof(
-            get_proof_system()
-                .prove(
-                    proposal.prover_artefacts,
-                    &[proposal.aux_secret_key],
-                    &frame_5_aad,
-                )
-                .expect("Failed to prove frame 0"),
-        ),
+    let proof = Proof::ArtProof(
+        ProvableChange::prove(
+            &proposal.change,
+            &mut proposal.private_zero_art,
+            &frame_5_aad,
+            None,
+        )
+        .expect("Failed to prove frame"),
     );
+
+    let frame_5 = frame::Frame::new(frame_5_tbs, proof);
 
     let _ = keyed_validator_0
         .validate(&frame_5)

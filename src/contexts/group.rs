@@ -5,11 +5,15 @@ use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use std::sync::Mutex;
 use tracing::{Level, debug, info, instrument, span, trace};
+use zrt_art::{
+    art::art_types::{PrivateArt, PublicArt},
+    changes::ProvableChange,
+};
 use zrt_crypto::schnorr;
+use zrt_zk::EligibilityRequirement;
 
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
-use zrt_art::types::{PrivateART, PublicART};
 
 use crate::{
     bounded_map::BoundedMap,
@@ -26,7 +30,6 @@ use crate::{
         payload::GroupActionPayload,
         protected_payload::{ProtectedPayload, ProtectedPayloadTbs, Sender},
     },
-    proof_system::get_proof_system,
     types,
     utils::{decrypt, derive_invite_key, derive_stage_key, encrypt, serialize},
 };
@@ -84,9 +87,8 @@ impl GroupContext {
         let leaf_key = (CortadoAffine::generator() * leaf_secret).into_affine();
         trace!(leaf_secret = ?leaf_secret, leaf_key = ?leaf_key, "Generate ART key pair");
         debug!("Making ART");
-        let (base_art, tree_key) =
-            PrivateART::new_art_from_secrets(&vec![leaf_secret], &CortadoAffine::generator())?;
-        let base_stk = derive_stage_key(&[0u8; 32], tree_key.key)?;
+        let base_art = PrivateArt::setup(&vec![leaf_secret])?;
+        let base_stk = derive_stage_key(&[0u8; 32], base_art.get_root_secret_key())?;
         trace!(art = ?base_art, stage_key = ?base_stk, "Intitialize ART and stage key");
 
         user.role = Role::Ownership;
@@ -100,7 +102,7 @@ impl GroupContext {
             group_info.id(),
             0,
             serialize((CortadoAffine::generator() * identity_secret_key).into_affine())?,
-            Some(GroupOperation::Init(base_art.clone().into())),
+            Some(GroupOperation::Init(base_art.get_public_art().clone())),
             vec![],
         );
         let protected_payload = encrypt(
@@ -138,10 +140,10 @@ impl GroupContext {
         )
     }
 
-    pub fn to_parts(&self) -> (ScalarField, LinearKeyedValidator, GroupInfo, u64, Nonce) {
+    pub fn to_parts(&self) -> (ScalarField, Vec<u8>, GroupInfo, u64, Nonce) {
         (
             self.identity_secret_key,
-            self.validator.lock().unwrap().clone(),
+            self.validator.lock().unwrap().serialize().unwrap(),
             self.group_info.clone(),
             self.seq_num,
             self.nonce,
@@ -485,7 +487,7 @@ impl GroupContext {
         let leaf_secret = self.compute_leaf_secret_for_invitee(invitee, ephemeral_secret_key)?;
 
         // Predict add member changes
-        let proposal = validator.propose_add_member(leaf_secret)?;
+        let mut proposal = validator.propose_add_member(leaf_secret)?;
 
         // Frame construction
         let protected_payload_tbs = ProtectedPayloadTbs::new(
@@ -501,7 +503,9 @@ impl GroupContext {
             self.group_info.id(),
             epoch,
             self.nonce.advance(),
-            Some(GroupOperation::AddMember(proposal.changes)),
+            Some(GroupOperation::AddMember(
+                proposal.change.get_branch_change().clone().into(),
+            )),
             vec![],
         );
 
@@ -521,10 +525,11 @@ impl GroupContext {
         frame_tbs.set_protected_payload(encrypted_protected_payload);
 
         // Proving
-        let proof = Proof::ArtProof(get_proof_system().prove(
-            proposal.prover_artefacts,
-            &[proposal.aux_secret_key],
+        let proof = Proof::ArtProof(ProvableChange::prove(
+            &proposal.change,
+            &mut proposal.private_zero_art,
             &Sha3_256::digest(frame_tbs.encode_to_vec()?),
+            None,
         )?);
         let frame = Frame::new(frame_tbs, proof);
 
@@ -570,7 +575,7 @@ impl GroupContext {
             .ok_or(Error::SenderNotInGroup)?;
 
         // Predict add member changes
-        let proposal = validator.propose_remove_member(*leaf, vanishing_leaf_secret)?;
+        let mut proposal = validator.propose_remove_member(*leaf, vanishing_leaf_secret)?;
 
         // Frame construction
         let protected_payload_tbs = ProtectedPayloadTbs::new(
@@ -592,7 +597,9 @@ impl GroupContext {
             self.group_info.id(),
             epoch,
             self.nonce.advance(),
-            Some(GroupOperation::RemoveMember(proposal.changes)),
+            Some(GroupOperation::RemoveMember(
+                proposal.change.get_branch_change().clone().into(),
+            )),
             vec![],
         );
 
@@ -605,10 +612,11 @@ impl GroupContext {
         frame_tbs.set_protected_payload(encrypted_protected_payload);
 
         // Proving
-        let proof = Proof::ArtProof(get_proof_system().prove(
-            proposal.prover_artefacts,
-            &[proposal.aux_secret_key],
+        let proof = Proof::ArtProof(ProvableChange::prove(
+            &proposal.change,
+            &mut proposal.private_zero_art,
             &Sha3_256::digest(frame_tbs.encode_to_vec()?),
+            None,
         )?);
         let frame = Frame::new(frame_tbs, proof);
 
@@ -653,13 +661,15 @@ impl GroupContext {
 
             frame_tbs.prove_schnorr::<Sha3_256>(validator.tree_key())?
         } else {
-            let proposal = validator.propose_update_key()?;
+            let mut proposal = validator.propose_update_key()?;
 
             let mut frame_tbs = FrameTbs::new(
                 self.group_info.id(),
                 validator.epoch() + 1,
                 self.nonce.advance(),
-                Some(GroupOperation::KeyUpdate(proposal.changes)),
+                Some(GroupOperation::KeyUpdate(
+                    proposal.change.get_branch_change().clone().into(),
+                )),
                 vec![],
             );
 
@@ -670,10 +680,11 @@ impl GroupContext {
             )?;
             frame_tbs.set_protected_payload(encrypted_protected_payload);
 
-            let proof = Proof::ArtProof(get_proof_system().prove(
-                proposal.prover_artefacts,
-                &[proposal.aux_secret_key],
+            let proof = Proof::ArtProof(ProvableChange::prove(
+                &proposal.change,
+                &mut proposal.private_zero_art,
                 &Sha3_256::digest(frame_tbs.encode_to_vec()?),
+                None,
             )?);
             Frame::new(frame_tbs, proof)
         };
@@ -698,13 +709,15 @@ impl GroupContext {
 
         let protected_payload = protected_payload_tbs.sign::<Sha3_256>(self.identity_secret_key)?;
 
-        let proposal = validator.propose_leave_group()?;
+        let mut proposal = validator.propose_leave_group()?;
 
         let mut frame_tbs = FrameTbs::new(
             self.group_info.id(),
             validator.epoch() + 1,
             self.nonce.advance(),
-            Some(GroupOperation::LeaveGroup(proposal.changes)),
+            Some(GroupOperation::LeaveGroup(
+                proposal.change.get_branch_change().clone().into(),
+            )),
             vec![],
         );
 
@@ -715,10 +728,11 @@ impl GroupContext {
         )?;
         frame_tbs.set_protected_payload(encrypted_protected_payload);
 
-        let proof = Proof::ArtProof(get_proof_system().prove(
-            proposal.prover_artefacts,
-            &[proposal.aux_secret_key],
+        let proof = Proof::ArtProof(ProvableChange::prove(
+            &proposal.change,
+            &mut proposal.private_zero_art,
             &Sha3_256::digest(frame_tbs.encode_to_vec()?),
+            None,
         )?);
         let frame = Frame::new(frame_tbs, proof);
 
@@ -778,13 +792,15 @@ impl GroupContext {
 
             frame_tbs.prove_schnorr::<Sha3_256>(validator.tree_key())?
         } else {
-            let proposal = validator.propose_update_key()?;
+            let mut proposal = validator.propose_update_key()?;
 
             let mut frame_tbs = FrameTbs::new(
                 self.group_info.id(),
                 validator.epoch() + 1,
                 self.nonce.advance(),
-                Some(GroupOperation::KeyUpdate(proposal.changes)),
+                Some(GroupOperation::KeyUpdate(
+                    proposal.change.get_branch_change().clone().into(),
+                )),
                 vec![],
             );
 
@@ -795,10 +811,11 @@ impl GroupContext {
             )?;
             frame_tbs.set_protected_payload(encrypted_protected_payload);
 
-            let proof = Proof::ArtProof(get_proof_system().prove(
-                proposal.prover_artefacts,
-                &[proposal.aux_secret_key],
+            let proof = Proof::ArtProof(ProvableChange::prove(
+                &proposal.change,
+                &mut proposal.private_zero_art,
                 &Sha3_256::digest(frame_tbs.encode_to_vec()?),
+                None,
             )?);
             Frame::new(frame_tbs, proof)
         };
@@ -858,13 +875,15 @@ impl GroupContext {
 
             frame_tbs.prove_schnorr::<Sha3_256>(validator.tree_key())?
         } else {
-            let proposal = validator.propose_update_key()?;
+            let mut proposal = validator.propose_update_key()?;
 
             let mut frame_tbs = FrameTbs::new(
                 self.group_info.id(),
                 validator.epoch() + 1,
                 self.nonce.advance(),
-                Some(GroupOperation::KeyUpdate(proposal.changes)),
+                Some(GroupOperation::KeyUpdate(
+                    proposal.change.get_branch_change().clone().into(),
+                )),
                 vec![],
             );
 
@@ -875,10 +894,11 @@ impl GroupContext {
             )?;
             frame_tbs.set_protected_payload(encrypted_protected_payload);
 
-            let proof = Proof::ArtProof(get_proof_system().prove(
-                proposal.prover_artefacts,
-                &[proposal.aux_secret_key],
+            let proof = Proof::ArtProof(ProvableChange::prove(
+                &proposal.change,
+                &mut proposal.private_zero_art,
                 &Sha3_256::digest(frame_tbs.encode_to_vec()?),
+                None,
             )?);
             Frame::new(frame_tbs, proof)
         };
@@ -908,13 +928,15 @@ impl GroupContext {
 
         let protected_payload = protected_payload_tbs.sign::<Sha3_256>(validator.leaf_key())?;
 
-        let proposal = validator.propose_update_key()?;
+        let mut proposal = validator.propose_update_key()?;
 
         let mut frame_tbs = FrameTbs::new(
             self.group_info.id(),
             epoch,
             self.nonce.advance(),
-            Some(GroupOperation::KeyUpdate(proposal.changes)),
+            Some(GroupOperation::KeyUpdate(
+                proposal.change.get_branch_change().clone().into(),
+            )),
             vec![],
         );
 
@@ -925,10 +947,11 @@ impl GroupContext {
         )?;
         frame_tbs.set_protected_payload(encrypted_protected_payload);
 
-        let proof = Proof::ArtProof(get_proof_system().prove(
-            proposal.prover_artefacts,
-            &[proposal.aux_secret_key],
+        let proof = Proof::ArtProof(ProvableChange::prove(
+            &proposal.change,
+            &mut proposal.private_zero_art,
             &Sha3_256::digest(frame_tbs.encode_to_vec()?),
+            None,
         )?);
 
         let frame = Frame::new(frame_tbs, proof);
@@ -989,7 +1012,7 @@ impl GroupContext {
         )?)
     }
 
-    pub fn tree(&self) -> PublicART<CortadoAffine> {
+    pub fn tree(&self) -> PublicArt<CortadoAffine> {
         self.validator.lock().unwrap().tree().clone()
     }
 }

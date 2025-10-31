@@ -5,8 +5,8 @@ use cortado::{self, CortadoAffine, Fr as ScalarField};
 use prost::Message;
 use sha3::Digest;
 use zrt_art::art::art_types::{PublicArt, PublicZeroArt};
+use zrt_art::changes::VerifiableChange;
 use zrt_art::changes::branch_change::{BranchChange, BranchChangeType};
-use zrt_art::changes::{VerifiableChange};
 use zrt_crypto::schnorr;
 
 use uuid::Uuid;
@@ -62,7 +62,7 @@ impl Frame {
         match &self.proof {
             Proof::SchnorrSignature(_) => return Err(Error::InvalidVerificationMethod),
             Proof::ArtProof(proof) => branch_change.verify(
-                public_zero_art,
+                &public_zero_art,
                 &D::digest(self.frame_tbs.encode_to_vec()?),
                 eligibility_requirement,
                 proof,
@@ -303,8 +303,8 @@ pub enum GroupOperation {
 impl From<BranchChange<CortadoAffine>> for GroupOperation {
     fn from(value: BranchChange<CortadoAffine>) -> Self {
         match value.change_type {
-            BranchChangeType::MakeBlank => GroupOperation::RemoveMember(value),
-            BranchChangeType::AppendNode => GroupOperation::AddMember(value),
+            BranchChangeType::RemoveMember => GroupOperation::RemoveMember(value),
+            BranchChangeType::AddMember => GroupOperation::AddMember(value),
             BranchChangeType::UpdateKey => GroupOperation::KeyUpdate(value),
             BranchChangeType::Leave => GroupOperation::LeaveGroup(value),
         }
@@ -317,19 +317,19 @@ impl TryFrom<zero_art_proto::GroupOperation> for GroupOperation {
     fn try_from(value: zero_art_proto::GroupOperation) -> Result<Self> {
         let group_operation = match value.operation.ok_or(Error::RequiredFieldAbsent)? {
             zero_art_proto::group_operation::Operation::Init(art) => {
-                GroupOperation::Init(PublicArt::deserialize(&art)?)
+                GroupOperation::Init(postcard::from_bytes(&art)?)
             }
             zero_art_proto::group_operation::Operation::AddMember(changes) => {
-                GroupOperation::AddMember(BranchChange::deserialize(&changes)?)
+                GroupOperation::AddMember(postcard::from_bytes(&changes)?)
             }
             zero_art_proto::group_operation::Operation::RemoveMember(changes) => {
-                GroupOperation::RemoveMember(BranchChange::deserialize(&changes)?)
+                GroupOperation::RemoveMember(postcard::from_bytes(&changes)?)
             }
             zero_art_proto::group_operation::Operation::KeyUpdate(changes) => {
-                GroupOperation::KeyUpdate(BranchChange::deserialize(&changes)?)
+                GroupOperation::KeyUpdate(postcard::from_bytes(&changes)?)
             }
             zero_art_proto::group_operation::Operation::LeaveGroup(changes) => {
-                GroupOperation::LeaveGroup(BranchChange::deserialize(&changes)?)
+                GroupOperation::LeaveGroup(postcard::from_bytes(&changes)?)
             }
             zero_art_proto::group_operation::Operation::DropGroup(challenge) => {
                 GroupOperation::DropGroup(challenge)
@@ -347,19 +347,27 @@ impl TryFrom<GroupOperation> for zero_art_proto::GroupOperation {
     fn try_from(value: GroupOperation) -> Result<Self> {
         let operation = match value {
             GroupOperation::Init(art) => {
-                zero_art_proto::group_operation::Operation::Init(art.serialize()?)
+                zero_art_proto::group_operation::Operation::Init(postcard::to_allocvec(&art)?)
             }
             GroupOperation::AddMember(changes) => {
-                zero_art_proto::group_operation::Operation::AddMember(changes.serialize()?)
+                zero_art_proto::group_operation::Operation::AddMember(postcard::to_allocvec(
+                    &changes,
+                )?)
             }
             GroupOperation::RemoveMember(changes) => {
-                zero_art_proto::group_operation::Operation::RemoveMember(changes.serialize()?)
+                zero_art_proto::group_operation::Operation::RemoveMember(postcard::to_allocvec(
+                    &changes,
+                )?)
             }
             GroupOperation::KeyUpdate(changes) => {
-                zero_art_proto::group_operation::Operation::KeyUpdate(changes.serialize()?)
+                zero_art_proto::group_operation::Operation::KeyUpdate(postcard::to_allocvec(
+                    &changes,
+                )?)
             }
             GroupOperation::LeaveGroup(changes) => {
-                zero_art_proto::group_operation::Operation::LeaveGroup(changes.serialize()?)
+                zero_art_proto::group_operation::Operation::LeaveGroup(postcard::to_allocvec(
+                    &changes,
+                )?)
             }
             GroupOperation::DropGroup(challenge) => {
                 zero_art_proto::group_operation::Operation::DropGroup(challenge)

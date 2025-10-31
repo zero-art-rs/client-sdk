@@ -1,6 +1,7 @@
 use cortado::CortadoAffine;
 use serde::{Deserialize, Serialize};
 use sha3::Sha3_256;
+use zrt_art::TreeMethods;
 use zrt_art::art::art_types::PublicArt;
 use zrt_art::changes::branch_change::MergeBranchChange;
 use zrt_art::changes::{ApplicableChange, VerifiableChange};
@@ -51,8 +52,6 @@ impl Validator for LinearValidator {
                     return Err(Error::InvalidEpoch);
                 }
 
-                PublicZeroArt::new(&self.upstream_art.clone());
-
                 let (public_zero_art, public_key) = if is_next_epoch {
                     let public_zero_art = PublicZeroArt::new(self.upstream_art.clone());
                     let public_key = group_owner_leaf_public_key(&self.upstream_art);
@@ -63,7 +62,11 @@ impl Validator for LinearValidator {
                     (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(change, public_zero_art, public_key)?;
+                frame.verify_art::<Sha3_256>(
+                    change.clone(),
+                    public_zero_art,
+                    EligibilityRequirement::Member(public_key),
+                )?;
                 let operation = GroupOperation::AddMember {
                     member_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
@@ -88,14 +91,15 @@ impl Validator for LinearValidator {
                     (public_zero_art, public_key)
                 } else {
                     let public_zero_art = PublicZeroArt::new(self.base_art.clone());
-                    let public_key = self
-                        .base_art
-                        .get_node(&change.node_index)?
-                        .get_public_key();
+                    let public_key = self.base_art.get_node(&change.node_index)?.get_public_key();
                     (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(change, public_zero_art, public_key)?;
+                frame.verify_art::<Sha3_256>(
+                    change.clone(),
+                    public_zero_art,
+                    EligibilityRequirement::Member(public_key),
+                )?;
                 let operation = GroupOperation::KeyUpdate {
                     old_public_key: public_key,
                     new_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
@@ -122,7 +126,11 @@ impl Validator for LinearValidator {
                     (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(change, public_zero_art, public_key)?;
+                frame.verify_art::<Sha3_256>(
+                    change.clone(),
+                    public_zero_art,
+                    EligibilityRequirement::Member(public_key),
+                )?;
                 let operation = GroupOperation::RemoveMember {
                     old_public_key: public_key,
                     new_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
@@ -157,14 +165,15 @@ impl Validator for LinearValidator {
                     (public_zero_art, public_key)
                 } else {
                     let public_zero_art = PublicZeroArt::new(self.base_art.clone());
-                    let public_key = self
-                        .base_art
-                        .get_node(&change.node_index)?
-                        .get_public_key();
+                    let public_key = self.base_art.get_node(&change.node_index)?.get_public_key();
                     (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(change, public_zero_art, public_key)?;
+                frame.verify_art::<Sha3_256>(
+                    change.clone(),
+                    public_zero_art,
+                    EligibilityRequirement::Member(public_key),
+                )?;
                 let operation = GroupOperation::LeaveGroup {
                     old_public_key: public_key,
                     new_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
@@ -221,7 +230,9 @@ impl LinearValidator {
         if !is_next_epoch {
             let mut upstream_art = self.base_art.clone();
 
-            let merge_branch_change = MergeBranchChange::new_for_observer(&vec![self.changes.clone(), vec![changes.clone()]].concat());
+            let merge_branch_change = MergeBranchChange::new_for_observer(
+                vec![self.changes.clone(), vec![changes.clone()]].concat(),
+            );
             merge_branch_change.update(&mut upstream_art)?;
 
             self.upstream_art = upstream_art;
@@ -233,7 +244,7 @@ impl LinearValidator {
 
         let base_art = self.upstream_art.clone();
         let mut upstream_art = self.upstream_art.clone();
-        upstream_art.update_public_art(changes)?;
+        changes.update(&mut upstream_art)?;
 
         self.base_art = base_art;
         self.upstream_art = upstream_art;

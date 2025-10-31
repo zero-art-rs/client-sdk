@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use ark_ec::{AffineRepr, CurveGroup};
 use sha3::Sha3_256;
-use zrt_art::types::PublicART;
+use zrt_art::art::art_types::PublicArt;
 
 use crate::{
     contexts::{group::GroupContext, invite::InviteContext},
@@ -243,7 +243,7 @@ fn test_invite_many_members_and_sync() {
         .collect::<Vec<CortadoAffine>>();
 
     let mut frames: Vec<models::frame::Frame> = Vec::with_capacity(members_secrets.len());
-    let mut trees: Vec<PublicART<CortadoAffine>> = Vec::with_capacity(members_secrets.len());
+    let mut trees: Vec<PublicArt<CortadoAffine>> = Vec::with_capacity(members_secrets.len());
     let mut invites: Vec<models::invite::Invite> = Vec::with_capacity(members_secrets.len());
 
     for public_key in member_public_keys.iter() {
@@ -379,7 +379,7 @@ fn test_remove_member() {
         .collect::<Vec<CortadoAffine>>();
 
     let mut frames: Vec<models::frame::Frame> = Vec::with_capacity(members_secrets.len());
-    let mut trees: Vec<PublicART<CortadoAffine>> = Vec::with_capacity(members_secrets.len());
+    let mut trees: Vec<PublicArt<CortadoAffine>> = Vec::with_capacity(members_secrets.len());
     let mut invites: Vec<models::invite::Invite> = Vec::with_capacity(members_secrets.len());
 
     for public_key in member_public_keys.iter() {
@@ -569,7 +569,7 @@ fn test_leave_member() {
         .collect::<Vec<CortadoAffine>>();
 
     let mut frames: Vec<models::frame::Frame> = Vec::with_capacity(members_secrets.len());
-    let mut trees: Vec<PublicART<CortadoAffine>> = Vec::with_capacity(members_secrets.len());
+    let mut trees: Vec<PublicArt<CortadoAffine>> = Vec::with_capacity(members_secrets.len());
     let mut invites: Vec<models::invite::Invite> = Vec::with_capacity(members_secrets.len());
 
     for public_key in member_public_keys.iter() {

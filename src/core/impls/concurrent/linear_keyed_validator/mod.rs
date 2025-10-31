@@ -1,15 +1,21 @@
 use std::collections::HashMap;
 
 use ark_ec::{AffineRepr, CurveGroup};
+use ark_std::rand::rngs::StdRng;
+use ark_std::rand::{SeedableRng, thread_rng};
 use serde::{Deserialize, Serialize};
 use sha3::Sha3_256;
 use tracing::{Level, debug, instrument, span, trace};
+use zrt_art::TreeMethods;
+use zrt_art::art::ArtAdvancedOps;
 use zrt_art::art::art_node::LeafStatus;
-use zrt_art::art::art_types::{PrivateArt, PublicArt};
+use zrt_art::art::art_types::{PrivateArt, PrivateZeroArt, PublicArt, PublicZeroArt};
 use zrt_art::changes::branch_change::BranchChange;
 use zrt_art::node_index::NodeIndex;
 use zrt_crypto::schnorr;
+use zrt_zk::EligibilityRequirement;
 
+use crate::errors;
 use crate::{
     bounded_map::BoundedMap,
     core::{
@@ -22,7 +28,7 @@ use crate::{
         AddMemberProposal, ChangesID, GroupOperation, LeaveGroupProposal, RemoveMemberProposal,
         StageKey, UpdateKeyProposal, ValidationResult, ValidationWithKeyResult,
     },
-    utils::{compute_changes_id, derive_leaf_key, derive_stage_key, deserialize},
+    utils::{compute_change_id, derive_leaf_key, derive_stage_key, deserialize},
 };
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 
@@ -35,12 +41,12 @@ struct Participant {
     art: PrivateArt<CortadoAffine>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug)]
 pub struct LinearKeyedValidator {
     base_art: PrivateArt<CortadoAffine>,
     base_stk: StageKey,
 
-    upstream_art: PrivateArt<CortadoAffine>,
+    upstream_art: PrivateZeroArt<StdRng>,
     upstream_stk: StageKey,
 
     changes: HashMap<ChangesID, BranchChange<CortadoAffine>>,
@@ -115,151 +121,143 @@ impl KeyedValidator for LinearKeyedValidator {
             .ok_or(Error::InvalidEpoch)?;
 
         match group_operation {
-            frame::GroupOperation::AddMember(changes) => {
+            frame::GroupOperation::AddMember(change) => {
                 let span = span!(Level::TRACE, "add_member_frame");
                 let _enter = span.enter();
 
-                trace!("Changes: {:?}", changes);
+                trace!("Changes: {:?}", change);
 
-                let (verifier_artefacts, public_key) = if is_next_epoch {
-                    let verifier_artefacts = self
-                        .upstream_art
-                        .compute_artefacts_for_verification(changes)?;
-                    trace!(
-                        "Verifier artefacts based on upstream: {:?}",
-                        verifier_artefacts
-                    );
+                let (public_zero_art, public_key) = if is_next_epoch {
+                    let public_zero_art =
+                        PublicZeroArt::new(self.upstream_art.get_public_art().clone());
                     let public_key = group_owner_leaf_public_key(&self.upstream_art);
-                    trace!("Upstream owner leaf key: {:?}", public_key);
-                    (verifier_artefacts, public_key)
+                    (public_zero_art, public_key)
                 } else {
-                    let verifier_artefacts =
-                        self.base_art.compute_artefacts_for_verification(changes)?;
-                    trace!("Verifier artefacts based on base: {:?}", verifier_artefacts);
+                    let public_zero_art =
+                        PublicZeroArt::new(self.base_art.get_public_art().clone());
                     let public_key = group_owner_leaf_public_key(&self.base_art);
                     trace!("Base owner leaf key: {:?}", public_key);
-                    (verifier_artefacts, public_key)
+                    (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
-
+                frame.verify_art::<Sha3_256>(
+                    change.clone(),
+                    public_zero_art,
+                    zrt_zk::EligibilityRequirement::Previleged((public_key, vec![])),
+                )?;
                 let operation = GroupOperation::AddMember {
-                    member_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
+                    member_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
                 if !is_next_epoch {
                     return Ok((Some(operation), self.upstream_stk));
                 }
 
-                Ok((Some(operation), self.apply_changes(changes)?))
+                Ok((Some(operation), self.apply_changes(change)?))
             }
-            frame::GroupOperation::KeyUpdate(changes) => {
+            frame::GroupOperation::KeyUpdate(change) => {
                 let span = span!(Level::TRACE, "key_update_frame");
                 let _enter = span.enter();
 
-                let (verifier_artefacts, public_key) = if is_next_epoch {
-                    let verifier_artefacts = self
-                        .upstream_art
-                        .compute_artefacts_for_verification(changes)?;
-                    trace!(
-                        "Verifier artefacts based on upstream: {:?}",
-                        verifier_artefacts
-                    );
+                let (public_zero_art, public_key) = if is_next_epoch {
+                    let public_zero_art =
+                        PublicZeroArt::new(self.upstream_art.get_public_art().clone());
                     let public_key = self
                         .upstream_art
-                        .get_node(&changes.node_index)?
+                        .get_node(&change.node_index)?
                         .get_public_key();
-                    trace!("Upstream member leaf key: {:?}", public_key);
-                    (verifier_artefacts, public_key)
+                    (public_zero_art, public_key)
                 } else {
-                    let verifier_artefacts =
-                        self.base_art.compute_artefacts_for_verification(changes)?;
-                    trace!("Verifier artefacts based on base: {:?}", verifier_artefacts);
-                    let public_key = self
-                        .base_art
-                        .get_node(&changes.node_index)?
-                        .get_public_key();
-                    trace!("Base member leaf key: {:?}", public_key);
-                    (verifier_artefacts, public_key)
+                    let public_zero_art =
+                        PublicZeroArt::new(self.base_art.get_public_art().clone());
+                    let public_key = self.base_art.get_node(&change.node_index)?.get_public_key();
+                    (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
+                frame.verify_art::<Sha3_256>(
+                    change.clone(),
+                    public_zero_art,
+                    zrt_zk::EligibilityRequirement::Member(public_key),
+                )?;
                 let operation = GroupOperation::KeyUpdate {
                     old_public_key: public_key,
-                    new_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
+                    new_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
 
                 let stage_key = if is_next_epoch {
-                    self.apply_changes(changes)?
+                    self.apply_changes(change)?
                 } else {
-                    self.merge_changes(changes)?
+                    self.merge_changes(change)?
                 };
 
                 Ok((Some(operation), stage_key))
             }
-            frame::GroupOperation::RemoveMember(changes) => {
+            frame::GroupOperation::RemoveMember(change) => {
                 let span = span!(Level::TRACE, "remove_member_frame");
                 let _enter = span.enter();
 
-                if self.upstream_art.get_node_index() == changes.node_index {
+                if *self.upstream_art.get_node_index() == change.node_index {
                     return Err(Error::UserRemovedFromGroup);
                 }
 
-                let (verifier_artefacts, public_key) = if is_next_epoch {
-                    let verifier_artefacts = self
-                        .upstream_art
-                        .compute_artefacts_for_verification(changes)?;
-                    let public_key = if LeafStatus::Active
+                let (public_zero_art, eligibility) = if is_next_epoch {
+                    let public_zero_art =
+                        PublicZeroArt::new(self.upstream_art.get_public_art().clone());
+                    let eligibility = if LeafStatus::Active
                         != self
                             .upstream_art
-                            .get_node(&changes.node_index)?
+                            .get_node(&change.node_index)?
                             .get_status()
                             .ok_or(Error::InvalidInput)?
                     {
-                        (CortadoAffine::generator() * self.upstream_art.get_root_key()?.key)
-                            .into_affine()
+                        EligibilityRequirement::Member(
+                            self.upstream_art.get_root().get_public_key(),
+                        )
                     } else {
-                        group_owner_leaf_public_key(&self.upstream_art)
+                        EligibilityRequirement::Previleged((
+                            group_owner_leaf_public_key(&self.upstream_art),
+                            vec![],
+                        ))
                     };
-                    (verifier_artefacts, public_key)
+                    (public_zero_art, eligibility)
                 } else {
-                    let verifier_artefacts =
-                        self.base_art.compute_artefacts_for_verification(changes)?;
-                    let public_key = if LeafStatus::Active
+                    let public_zero_art =
+                        PublicZeroArt::new(self.base_art.get_public_art().clone());
+                    let eligibility = if LeafStatus::Active
                         != self
                             .base_art
-                            .get_node(&changes.node_index)?
+                            .get_node(&change.node_index)?
                             .get_status()
                             .ok_or(Error::InvalidInput)?
                     {
-                        (CortadoAffine::generator() * self.base_art.get_root_key()?.key)
-                            .into_affine()
+                        EligibilityRequirement::Member(self.base_art.get_root().get_public_key())
                     } else {
-                        group_owner_leaf_public_key(&self.base_art)
+                        EligibilityRequirement::Previleged((
+                            group_owner_leaf_public_key(&self.base_art),
+                            vec![],
+                        ))
                     };
-                    (verifier_artefacts, public_key)
+                    (public_zero_art, eligibility)
                 };
 
-                frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
+                frame.verify_art::<Sha3_256>(change.clone(), public_zero_art, eligibility)?;
 
                 let member_public_key = if is_next_epoch {
                     self.upstream_art
-                        .get_node(&changes.node_index)?
+                        .get_node(&change.node_index)?
                         .get_public_key()
                 } else {
-                    self.base_art
-                        .get_node(&changes.node_index)?
-                        .get_public_key()
+                    self.base_art.get_node(&change.node_index)?.get_public_key()
                 };
 
                 let operation = GroupOperation::RemoveMember {
                     old_public_key: member_public_key,
-                    new_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
+                    new_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
 
                 let stage_key = if is_next_epoch {
-                    self.apply_changes(changes)?
+                    self.apply_changes(change)?
                 } else {
-                    self.merge_changes(changes)?
+                    self.merge_changes(change)?
                 };
 
                 Ok((Some(operation), stage_key))
@@ -273,46 +271,41 @@ impl KeyedValidator for LinearKeyedValidator {
                 frame.verify_schnorr::<Sha3_256>(owner_public_key)?;
                 Ok((Some(GroupOperation::Init), self.upstream_stk))
             }
-            frame::GroupOperation::LeaveGroup(changes) => {
+            frame::GroupOperation::LeaveGroup(change) => {
                 let span = span!(Level::TRACE, "leave_group_frame");
                 let _enter = span.enter();
 
-                let (verifier_artefacts, public_key) = if is_next_epoch {
-                    let verifier_artefacts = self
-                        .upstream_art
-                        .compute_artefacts_for_verification(changes)?;
-                    trace!(
-                        "Verifier artefacts based on upstream: {:?}",
-                        verifier_artefacts
-                    );
+                let (public_zero_art, public_key) = if is_next_epoch {
+                    let public_zero_art =
+                        PublicZeroArt::new(self.upstream_art.get_public_art().clone());
                     let public_key = self
                         .upstream_art
-                        .get_node(&changes.node_index)?
+                        .get_node(&change.node_index)?
                         .get_public_key();
                     trace!("Upstream member leaf key: {:?}", public_key);
-                    (verifier_artefacts, public_key)
+                    (public_zero_art, public_key)
                 } else {
-                    let verifier_artefacts =
-                        self.base_art.compute_artefacts_for_verification(changes)?;
-                    trace!("Verifier artefacts based on base: {:?}", verifier_artefacts);
-                    let public_key = self
-                        .base_art
-                        .get_node(&changes.node_index)?
-                        .get_public_key();
+                    let public_zero_art =
+                        PublicZeroArt::new(self.base_art.get_public_art().clone());
+                    let public_key = self.base_art.get_node(&change.node_index)?.get_public_key();
                     trace!("Base member leaf key: {:?}", public_key);
-                    (verifier_artefacts, public_key)
+                    (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
+                frame.verify_art::<Sha3_256>(
+                    change.clone(),
+                    public_zero_art,
+                    zrt_zk::EligibilityRequirement::Member(public_key),
+                )?;
                 let operation = GroupOperation::LeaveGroup {
                     old_public_key: public_key,
-                    new_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
+                    new_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
 
                 let stage_key = if is_next_epoch {
-                    self.apply_changes(changes)?
+                    self.apply_changes(change)?
                 } else {
-                    self.merge_changes(changes)?
+                    self.merge_changes(change)?
                 };
 
                 Ok((Some(operation), stage_key))
@@ -327,14 +320,14 @@ impl KeyedValidator for LinearKeyedValidator {
         }
 
         let mut temporary_art = self.upstream_art.clone();
-        let (tree_key, changes, prover_artefacts) =
-            temporary_art.append_or_replace_node(&leaf_secret)?;
+        let change = temporary_art.add_member(leaf_secret)?;
+        let root_key = temporary_art.get_root_secret_key();
 
         Ok(AddMemberProposal {
-            changes,
-            stage_key: derive_stage_key(&self.upstream_stk, tree_key.key)?,
-            prover_artefacts,
-            aux_secret_key: self.upstream_art.secret_key,
+            change,
+            stage_key: derive_stage_key(&self.upstream_stk, root_key)?,
+            aux_secret_key: self.upstream_art.get_leaf_secret_key(),
+            private_zero_art: temporary_art,
         })
     }
 
@@ -343,89 +336,96 @@ impl KeyedValidator for LinearKeyedValidator {
         leaf_public_key: CortadoAffine,
         vanishing_secret_key: ScalarField,
     ) -> Result<RemoveMemberProposal> {
-        let leaf = self.upstream_art.get_leaf_with(&leaf_public_key)?;
+        let leaf = self.upstream_art.get_leaf_with(leaf_public_key)?;
 
         if self.leaf_public_key() != group_owner_leaf_public_key(&self.upstream_art)
-            && leaf.is_active()
+            && matches!(leaf.get_status(), Some(LeafStatus::Active))
         {
             return Err(Error::Forbidden);
         }
 
         let mut temporary_art = self.upstream_art.clone();
-        let (tree_key, changes, prover_artefacts) = temporary_art.make_blank(
-            &self.upstream_art.get_path_to_leaf(&leaf_public_key)?,
-            &vanishing_secret_key,
+        let change = temporary_art.remove_member(
+            &self
+                .upstream_art
+                .get_path_to_leaf_with(leaf_public_key)?
+                .into(),
+            vanishing_secret_key,
         )?;
+        let root_key = temporary_art.get_root_secret_key();
 
-        let secret_key = if leaf.is_active() {
-            self.upstream_art.secret_key
+        let secret_key = if matches!(leaf.get_status(), Some(LeafStatus::Active)) {
+            self.upstream_art.get_leaf_secret_key()
         } else {
-            self.upstream_art.get_root_key()?.key
+            self.upstream_art.get_root_secret_key()
         };
 
         Ok(RemoveMemberProposal {
-            changes,
-            stage_key: derive_stage_key(&self.upstream_stk, tree_key.key)?,
-            prover_artefacts,
+            change,
+            stage_key: derive_stage_key(&self.upstream_stk, root_key)?,
             aux_secret_key: secret_key,
+            private_zero_art: temporary_art,
         })
     }
 
     fn propose_update_key(&mut self) -> Result<UpdateKeyProposal> {
-        let secret_key = derive_leaf_key(&self.upstream_stk, self.upstream_art.secret_key)?;
+        let secret_key =
+            derive_leaf_key(&self.upstream_stk, self.upstream_art.get_leaf_secret_key())?;
 
         let mut temporary_art = self.upstream_art.clone();
-        let (tree_key, changes, prover_artefacts) = temporary_art.update_key(&secret_key)?;
-        let stage_key = derive_stage_key(&self.upstream_stk, tree_key.key)?;
+        let change = temporary_art.update_key(secret_key)?;
+        let root_key = temporary_art.get_root_secret_key();
+        let stage_key = derive_stage_key(&self.upstream_stk, root_key)?;
 
-        let changes_id = compute_changes_id(&changes)?;
+        let changes_id = compute_change_id(&change.get_branch_change())?;
         self.participation_leafs.insert(changes_id, secret_key);
 
         Ok(UpdateKeyProposal {
-            changes,
+            change,
             stage_key,
-            prover_artefacts,
-            aux_secret_key: self.upstream_art.secret_key,
+            aux_secret_key: self.upstream_art.get_leaf_secret_key(),
+            private_zero_art: temporary_art,
         })
     }
 
     fn propose_leave_group(&mut self) -> Result<UpdateKeyProposal> {
-        let secret_key = derive_leaf_key(&self.upstream_stk, self.upstream_art.secret_key)?;
+        let secret_key =
+            derive_leaf_key(&self.upstream_stk, self.upstream_art.get_leaf_secret_key())?;
 
         let mut temporary_art = self.upstream_art.clone();
-        let (tree_key, changes, prover_artefacts) = temporary_art.leave(secret_key)?;
-        let stage_key = derive_stage_key(&self.upstream_stk, tree_key.key)?;
+        let change = temporary_art.leave_group(secret_key)?;
+        let root_key = temporary_art.get_root_secret_key();
+        let stage_key = derive_stage_key(&self.upstream_stk, root_key)?;
 
-        let changes_id = compute_changes_id(&changes)?;
+        let changes_id = compute_change_id(&change.get_branch_change())?;
         self.participation_leafs.insert(changes_id, secret_key);
 
         Ok(LeaveGroupProposal {
-            changes,
+            change,
             stage_key,
-            prover_artefacts,
-            aux_secret_key: self.upstream_art.secret_key,
+            aux_secret_key: self.upstream_art.get_leaf_secret_key(),
+            private_zero_art: temporary_art,
         })
     }
 
     fn sign_with_leaf_key(&self, message: &[u8]) -> Result<Vec<u8>> {
         Ok(schnorr::sign(
-            &vec![self.upstream_art.secret_key],
-            &vec![(CortadoAffine::generator() * self.upstream_art.secret_key).into_affine()],
+            &vec![self.upstream_art.get_leaf_secret_key()],
+            &vec![self.upstream_art.get_leaf_public_key()],
             message,
         )?)
     }
 
     fn sign_with_tree_key(&self, message: &[u8]) -> Result<Vec<u8>> {
-        let tree_key = self.upstream_art.get_root_key()?;
         Ok(schnorr::sign(
-            &vec![tree_key.key],
-            &vec![(tree_key.generator * tree_key.key).into_affine()],
+            &vec![self.upstream_art.get_root_secret_key()],
+            &vec![self.upstream_art.get_root_public_key()],
             message,
         )?)
     }
 
     fn leaf_public_key(&self) -> CortadoAffine {
-        (CortadoAffine::generator() * self.upstream_art.secret_key).into_affine()
+        self.upstream_art.get_leaf_public_key()
     }
 
     fn stage_key(&self) -> StageKey {
@@ -433,21 +433,21 @@ impl KeyedValidator for LinearKeyedValidator {
     }
 
     fn leaf_key(&self) -> ScalarField {
-        self.upstream_art.secret_key
+        self.upstream_art.get_leaf_secret_key()
     }
 
     fn tree_key(&self) -> ScalarField {
-        self.upstream_art
-            .get_root_key()
-            .expect("Something very BAD happened")
-            .key
+        self.upstream_art.get_root_secret_key()
     }
 }
 
 impl LinearKeyedValidator {
     pub fn new(base_art: PrivateArt<CortadoAffine>, base_stk: StageKey, epoch: u64) -> Self {
         Self {
-            upstream_art: base_art.clone(),
+            upstream_art: PrivateZeroArt::new(
+                base_art.clone(),
+                Box::new(StdRng::from_rng(thread_rng()).unwrap()),
+            ),
             upstream_stk: base_stk,
             base_art,
             base_stk,
@@ -459,11 +459,56 @@ impl LinearKeyedValidator {
     }
 
     pub fn serialize(&self) -> Result<Vec<u8>> {
-        postcard::to_allocvec(&self).map_err(|e| e.into())
+        type Parts = (
+            PrivateArt<CortadoAffine>,
+            StageKey,
+            PrivateArt<CortadoAffine>,
+            StageKey,
+            HashMap<ChangesID, BranchChange<CortadoAffine>>,
+            u64,
+            Option<Participant>,
+            BoundedMap<ChangesID, ScalarField>,
+        );
+
+        let parts: Parts = (
+            self.upstream_art.get_private_art().clone(),
+            self.upstream_stk,
+            self.base_art.clone(),
+            self.base_stk,
+            self.changes.clone(),
+            self.epoch,
+            self.participant.clone(),
+            self.participation_leafs.clone(),
+        );
+        postcard::to_allocvec(&parts).map_err(|e| e.into())
     }
 
     pub fn deserialize(value: &[u8]) -> Result<Self> {
-        postcard::from_bytes(value).map_err(|e| e.into())
+        type Parts = (
+            PrivateArt<CortadoAffine>,
+            StageKey,
+            PrivateArt<CortadoAffine>,
+            StageKey,
+            HashMap<ChangesID, BranchChange<CortadoAffine>>,
+            u64,
+            Option<Participant>,
+            BoundedMap<ChangesID, ScalarField>,
+        );
+        let parts: Parts = postcard::from_bytes(value).map_err(|_| errors::Error::InvalidInput)?;
+
+        Ok(Self {
+            base_art: parts.2,
+            base_stk: parts.3,
+            upstream_art: PrivateZeroArt::new(
+                parts.0,
+                Box::new(StdRng::from_rng(thread_rng()).unwrap()),
+            ),
+            upstream_stk: parts.1,
+            changes: parts.4,
+            epoch: parts.5,
+            participant: parts.6,
+            participation_leafs: parts.7,
+        })
     }
 
     pub fn is_participant(&self) -> bool {

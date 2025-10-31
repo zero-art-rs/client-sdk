@@ -129,6 +129,6 @@ pub fn derive_encryption_key(stage_key: &StageKey) -> Result<StageKey> {
     hkdf(Some(b"encryption-key-derivation"), stage_key)
 }
 
-pub fn compute_changes_id(changes: &BranchChange<CortadoAffine>) -> Result<ChangesID> {
-    Ok(Sha3_256::digest(changes.serialize()?).to_vec()[..8].try_into()?)
+pub fn compute_change_id(changes: &BranchChange<CortadoAffine>) -> Result<ChangesID> {
+    Ok(Sha3_256::digest(postcard::to_allocvec(&changes)?).to_vec()[..8].try_into()?)
 }
