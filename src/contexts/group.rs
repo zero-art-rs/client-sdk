@@ -10,7 +10,6 @@ use zrt_art::{
     changes::ProvableChange,
 };
 use zrt_crypto::schnorr;
-use zrt_zk::EligibilityRequirement;
 
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
@@ -875,6 +874,7 @@ impl GroupContext {
 
             frame_tbs.prove_schnorr::<Sha3_256>(validator.tree_key())?
         } else {
+
             let mut proposal = validator.propose_update_key()?;
 
             let mut frame_tbs = FrameTbs::new(

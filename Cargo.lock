@@ -602,7 +602,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 [[package]]
 name = "cortado"
 version = "0.1.0"
-source = "git+https://git@github.com/zero-art-rs/core.git#eeb4e2aa398c3dfe8d46cdce0fabd8ad8df44a0d"
+source = "git+https://git@github.com/zero-art-rs/core.git#83dcb95de506c8d52587dac551b7736b05a3fb43"
 dependencies = [
  "ark-algebra-test-templates",
  "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
@@ -2219,7 +2219,7 @@ dependencies = [
 [[package]]
 name = "zrt-art"
 version = "0.2.0"
-source = "git+https://git@github.com/zero-art-rs/core.git#eeb4e2aa398c3dfe8d46cdce0fabd8ad8df44a0d"
+source = "git+https://git@github.com/zero-art-rs/core.git#83dcb95de506c8d52587dac551b7736b05a3fb43"
 dependencies = [
  "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
  "ark-ed25519",
@@ -2286,7 +2286,7 @@ dependencies = [
 [[package]]
 name = "zrt-crypto"
 version = "0.1.0"
-source = "git+https://git@github.com/zero-art-rs/core.git#eeb4e2aa398c3dfe8d46cdce0fabd8ad8df44a0d"
+source = "git+https://git@github.com/zero-art-rs/core.git#83dcb95de506c8d52587dac551b7736b05a3fb43"
 dependencies = [
  "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
  "cortado",
@@ -2301,7 +2301,7 @@ dependencies = [
 [[package]]
 name = "zrt-zk"
 version = "0.3.0"
-source = "git+https://git@github.com/zero-art-rs/core.git#eeb4e2aa398c3dfe8d46cdce0fabd8ad8df44a0d"
+source = "git+https://git@github.com/zero-art-rs/core.git#83dcb95de506c8d52587dac551b7736b05a3fb43"
 dependencies = [
  "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
  "ark-ed25519",

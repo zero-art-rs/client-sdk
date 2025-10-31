@@ -4,7 +4,7 @@ use sha3::Sha3_256;
 use zrt_art::TreeMethods;
 use zrt_art::art::art_types::PublicArt;
 use zrt_art::changes::branch_change::MergeBranchChange;
-use zrt_art::changes::{ApplicableChange, VerifiableChange};
+use zrt_art::changes::ApplicableChange;
 use zrt_art::{art::art_types::PublicZeroArt, changes::branch_change::BranchChange};
 use zrt_zk::EligibilityRequirement;
 

@@ -511,6 +511,7 @@ fn test_change_group() {
 
     let (mut group_context, frame) = GroupContext::new(identity_secret_key, owner, group_info)
         .expect("Failed to create group context");
+        
 
     frame
         .verify_schnorr::<Sha3_256>(identity_public_key)
@@ -533,6 +534,47 @@ fn test_change_group() {
         "NewGrpName",
         "Group should change name"
     );
+}
+
+#[test]
+fn test_send_frame() {
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG) // щоб бачили trace/debug/info
+        .with_test_writer() // щоб писало в буфер тестів
+        .try_init();
+    let mut rng = StdRng::seed_from_u64(0);
+
+    let group_id = Uuid::new_v4();
+
+    let group_info =
+        models::group_info::GroupInfo::new(group_id, String::from("Group"), Utc::now(), vec![]);
+
+    let identity_secret_key = ScalarField::rand(&mut rng);
+    let identity_public_key = (CortadoAffine::generator() * identity_secret_key).into_affine();
+    let _identity_public_key_bytes =
+        utils::serialize(identity_public_key).expect("Failed to serialize identity public key");
+
+    let owner = models::group_info::User::new(String::from("Owner"), identity_public_key, vec![]);
+
+    let (mut group_context, frame) = GroupContext::new(identity_secret_key, owner, group_info)
+        .expect("Failed to create group context");
+        
+
+    frame
+        .verify_schnorr::<Sha3_256>(identity_public_key)
+        .expect("Frame should be signed by identity secret key");
+
+    group_context
+        .process_frame(frame)
+        .expect("Process initial frame");
+
+    let frame = group_context
+        .create_frame(vec![])
+        .expect("Create frame with group change");
+
+    group_context
+        .process_frame(frame)
+        .expect("Process group change frame");
 }
 
 #[test]

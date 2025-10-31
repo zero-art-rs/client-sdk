@@ -4,7 +4,7 @@ use ark_std::rand::rngs::StdRng;
 use cortado::CortadoAffine;
 use zrt_art::{
     art::art_types::PrivateZeroArt,
-    changes::branch_change::{ArtOperationOutput, BranchChange},
+    changes::branch_change::ArtOperationOutput,
 };
 
 #[derive(Debug)]

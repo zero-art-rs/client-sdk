@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use ark_ec::{AffineRepr, CurveGroup};
 use ark_std::rand::rngs::StdRng;
 use ark_std::rand::{SeedableRng, thread_rng};
 use serde::{Deserialize, Serialize};
@@ -376,6 +375,7 @@ impl KeyedValidator for LinearKeyedValidator {
         let change = temporary_art.update_key(secret_key)?;
         let root_key = temporary_art.get_root_secret_key();
         let stage_key = derive_stage_key(&self.upstream_stk, root_key)?;
+        debug!("{:?}", temporary_art);
 
         let changes_id = compute_change_id(&change.get_branch_change())?;
         self.participation_leafs.insert(changes_id, secret_key);
