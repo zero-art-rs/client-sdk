@@ -1,10 +1,12 @@
 use cortado::CortadoAffine;
 use serde::{Deserialize, Serialize};
 use sha3::Sha3_256;
-use zrt_art::{
-    traits::{ARTPublicAPI, ARTPublicView},
-    types::{BranchChanges, PublicART},
-};
+use zrt_art::TreeMethods;
+use zrt_art::art::art_types::PublicArt;
+use zrt_art::changes::branch_change::MergeBranchChange;
+use zrt_art::changes::ApplicableChange;
+use zrt_art::{art::art_types::PublicZeroArt, changes::branch_change::BranchChange};
+use zrt_zk::EligibilityRequirement;
 
 use crate::{
     core::{impls::group_owner_leaf_public_key, traits::Validator},
@@ -16,9 +18,9 @@ use crate::{
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LinearValidator {
-    base_art: PublicART<CortadoAffine>,
-    upstream_art: PublicART<CortadoAffine>,
-    changes: Vec<BranchChanges<CortadoAffine>>,
+    base_art: PublicArt<CortadoAffine>,
+    upstream_art: PublicArt<CortadoAffine>,
+    changes: Vec<BranchChange<CortadoAffine>>,
     closed: bool,
     epoch: u64,
 }
@@ -45,96 +47,96 @@ impl Validator for LinearValidator {
             .ok_or(Error::InvalidEpoch)?;
 
         match group_operation {
-            frame::GroupOperation::AddMember(changes) => {
+            frame::GroupOperation::AddMember(change) => {
                 if !is_next_epoch && self.closed {
                     return Err(Error::InvalidEpoch);
                 }
 
-                let (verifier_artefacts, public_key) = if is_next_epoch {
-                    let verifier_artefacts = self
-                        .upstream_art
-                        .compute_artefacts_for_verification(changes)?;
+                let (public_zero_art, public_key) = if is_next_epoch {
+                    let public_zero_art = PublicZeroArt::new(self.upstream_art.clone());
                     let public_key = group_owner_leaf_public_key(&self.upstream_art);
-                    (verifier_artefacts, public_key)
+                    (public_zero_art, public_key)
                 } else {
-                    let verifier_artefacts =
-                        self.base_art.compute_artefacts_for_verification(changes)?;
+                    let public_zero_art = PublicZeroArt::new(self.base_art.clone());
                     let public_key = group_owner_leaf_public_key(&self.base_art);
-                    (verifier_artefacts, public_key)
+                    (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
+                frame.verify_art::<Sha3_256>(
+                    change.clone(),
+                    public_zero_art,
+                    EligibilityRequirement::Member(public_key),
+                )?;
                 let operation = GroupOperation::AddMember {
-                    member_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
+                    member_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
 
-                self.apply_changes(changes, is_next_epoch)?;
+                self.apply_changes(change, is_next_epoch)?;
 
                 self.closed = true;
 
                 Ok(Some(operation))
             }
-            frame::GroupOperation::KeyUpdate(changes) => {
+            frame::GroupOperation::KeyUpdate(change) => {
                 if !is_next_epoch && self.closed {
                     return Err(Error::InvalidEpoch);
                 }
 
-                let (verifier_artefacts, public_key) = if is_next_epoch {
-                    let verifier_artefacts = self
-                        .upstream_art
-                        .compute_artefacts_for_verification(changes)?;
+                let (public_zero_art, public_key) = if is_next_epoch {
+                    let public_zero_art = PublicZeroArt::new(self.upstream_art.clone());
                     let public_key = self
                         .upstream_art
-                        .get_node(&changes.node_index)?
+                        .get_node(&change.node_index)?
                         .get_public_key();
-                    (verifier_artefacts, public_key)
+                    (public_zero_art, public_key)
                 } else {
-                    let verifier_artefacts =
-                        self.base_art.compute_artefacts_for_verification(changes)?;
-                    let public_key = self
-                        .base_art
-                        .get_node(&changes.node_index)?
-                        .get_public_key();
-                    (verifier_artefacts, public_key)
+                    let public_zero_art = PublicZeroArt::new(self.base_art.clone());
+                    let public_key = self.base_art.get_node(&change.node_index)?.get_public_key();
+                    (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
+                frame.verify_art::<Sha3_256>(
+                    change.clone(),
+                    public_zero_art,
+                    EligibilityRequirement::Member(public_key),
+                )?;
                 let operation = GroupOperation::KeyUpdate {
                     old_public_key: public_key,
-                    new_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
+                    new_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
 
-                self.apply_changes(changes, is_next_epoch)?;
+                self.apply_changes(change, is_next_epoch)?;
 
                 self.closed = false;
 
                 Ok(Some(operation))
             }
-            frame::GroupOperation::RemoveMember(changes) => {
+            frame::GroupOperation::RemoveMember(change) => {
                 if !is_next_epoch && self.closed {
                     return Err(Error::InvalidEpoch);
                 }
 
-                let (verifier_artefacts, public_key) = if is_next_epoch {
-                    let verifier_artefacts = self
-                        .upstream_art
-                        .compute_artefacts_for_verification(changes)?;
+                let (public_zero_art, public_key) = if is_next_epoch {
+                    let public_zero_art = PublicZeroArt::new(self.upstream_art.clone());
                     let public_key = group_owner_leaf_public_key(&self.upstream_art);
-                    (verifier_artefacts, public_key)
+                    (public_zero_art, public_key)
                 } else {
-                    let verifier_artefacts =
-                        self.base_art.compute_artefacts_for_verification(changes)?;
+                    let public_zero_art = PublicZeroArt::new(self.base_art.clone());
                     let public_key = group_owner_leaf_public_key(&self.base_art);
-                    (verifier_artefacts, public_key)
+                    (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
+                frame.verify_art::<Sha3_256>(
+                    change.clone(),
+                    public_zero_art,
+                    EligibilityRequirement::Member(public_key),
+                )?;
                 let operation = GroupOperation::RemoveMember {
                     old_public_key: public_key,
-                    new_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
+                    new_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
 
-                self.apply_changes(changes, is_next_epoch)?;
+                self.apply_changes(change, is_next_epoch)?;
 
                 self.closed = false;
 
@@ -149,37 +151,35 @@ impl Validator for LinearValidator {
                 frame.verify_schnorr::<Sha3_256>(owner_public_key)?;
                 Ok(Some(GroupOperation::Init))
             }
-            frame::GroupOperation::LeaveGroup(changes) => {
+            frame::GroupOperation::LeaveGroup(change) => {
                 if !is_next_epoch && self.closed {
                     return Err(Error::InvalidEpoch);
                 }
 
-                let (verifier_artefacts, public_key) = if is_next_epoch {
-                    let verifier_artefacts = self
-                        .upstream_art
-                        .compute_artefacts_for_verification(changes)?;
+                let (public_zero_art, public_key) = if is_next_epoch {
+                    let public_zero_art = PublicZeroArt::new(self.upstream_art.clone());
                     let public_key = self
                         .upstream_art
-                        .get_node(&changes.node_index)?
+                        .get_node(&change.node_index)?
                         .get_public_key();
-                    (verifier_artefacts, public_key)
+                    (public_zero_art, public_key)
                 } else {
-                    let verifier_artefacts =
-                        self.base_art.compute_artefacts_for_verification(changes)?;
-                    let public_key = self
-                        .base_art
-                        .get_node(&changes.node_index)?
-                        .get_public_key();
-                    (verifier_artefacts, public_key)
+                    let public_zero_art = PublicZeroArt::new(self.base_art.clone());
+                    let public_key = self.base_art.get_node(&change.node_index)?.get_public_key();
+                    (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(verifier_artefacts, public_key)?;
+                frame.verify_art::<Sha3_256>(
+                    change.clone(),
+                    public_zero_art,
+                    EligibilityRequirement::Member(public_key),
+                )?;
                 let operation = GroupOperation::LeaveGroup {
                     old_public_key: public_key,
-                    new_public_key: *changes.public_keys.last().ok_or(Error::InvalidInput)?,
+                    new_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
 
-                self.apply_changes(changes, is_next_epoch)?;
+                self.apply_changes(change, is_next_epoch)?;
 
                 self.closed = false;
 
@@ -193,7 +193,7 @@ impl Validator for LinearValidator {
         self.upstream_art.get_root().get_public_key()
     }
 
-    fn tree(&self) -> &PublicART<CortadoAffine> {
+    fn tree(&self) -> &PublicArt<CortadoAffine> {
         &self.upstream_art
     }
 
@@ -203,7 +203,7 @@ impl Validator for LinearValidator {
 }
 
 impl LinearValidator {
-    pub fn new(base_art: PublicART<CortadoAffine>, epoch: u64) -> Self {
+    pub fn new(base_art: PublicArt<CortadoAffine>, epoch: u64) -> Self {
         Self {
             upstream_art: base_art.clone(),
             base_art,
@@ -224,12 +224,16 @@ impl LinearValidator {
     #[allow(clippy::useless_vec)]
     fn apply_changes(
         &mut self,
-        changes: &BranchChanges<CortadoAffine>,
+        changes: &BranchChange<CortadoAffine>,
         is_next_epoch: bool,
     ) -> Result<()> {
         if !is_next_epoch {
             let mut upstream_art = self.base_art.clone();
-            upstream_art.merge_all(&vec![self.changes.clone(), vec![changes.clone()]].concat())?;
+
+            let merge_branch_change = MergeBranchChange::new_for_observer(
+                vec![self.changes.clone(), vec![changes.clone()]].concat(),
+            );
+            merge_branch_change.update(&mut upstream_art)?;
 
             self.upstream_art = upstream_art;
 
@@ -240,7 +244,7 @@ impl LinearValidator {
 
         let base_art = self.upstream_art.clone();
         let mut upstream_art = self.upstream_art.clone();
-        upstream_art.update_public_art(changes)?;
+        changes.update(&mut upstream_art)?;
 
         self.base_art = base_art;
         self.upstream_art = upstream_art;

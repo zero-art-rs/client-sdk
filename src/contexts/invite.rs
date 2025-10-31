@@ -14,7 +14,7 @@ use cortado::{self, CortadoAffine, Fr as ScalarField};
 use sha3::Sha3_256;
 use tracing::{debug, info, instrument, trace};
 use uuid::Uuid;
-use zrt_art::types::{PrivateART, PublicART};
+use zrt_art::art::art_types::{PrivateArt, PublicArt};
 use zrt_crypto::schnorr;
 
 pub struct InviteContext {
@@ -113,8 +113,8 @@ impl InviteContext {
         (CortadoAffine::generator() * self.leaf_secret).into_affine()
     }
 
-    pub fn upgrade(self, art: PublicART<CortadoAffine>) -> Result<GroupContext> {
-        let base_art = PrivateART::from_public_art_and_secret(art, self.leaf_secret)?;
+    pub fn upgrade(self, art: PublicArt<CortadoAffine>) -> Result<GroupContext> {
+        let base_art = PrivateArt::new(art, self.leaf_secret)?;
         Ok(GroupContext::from_parts(
             self.identity_secret_key,
             LinearKeyedValidator::new(base_art, self.stk, self.epoch),
