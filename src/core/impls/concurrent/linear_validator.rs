@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use sha3::Sha3_256;
 use zrt_art::TreeMethods;
 use zrt_art::art::art_types::PublicArt;
-use zrt_art::changes::branch_change::MergeBranchChange;
 use zrt_art::changes::ApplicableChange;
+use zrt_art::changes::branch_change::MergeBranchChange;
 use zrt_art::{art::art_types::PublicZeroArt, changes::branch_change::BranchChange};
 use zrt_zk::EligibilityRequirement;
 
@@ -62,7 +62,7 @@ impl Validator for LinearValidator {
                     (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(
+                frame.verify_art::<Sha3_256, BranchChange<CortadoAffine>>(
                     change.clone(),
                     public_zero_art,
                     EligibilityRequirement::Member(public_key),
@@ -95,7 +95,7 @@ impl Validator for LinearValidator {
                     (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(
+                frame.verify_art::<Sha3_256, BranchChange<CortadoAffine>>(
                     change.clone(),
                     public_zero_art,
                     EligibilityRequirement::Member(public_key),
@@ -126,7 +126,7 @@ impl Validator for LinearValidator {
                     (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(
+                frame.verify_art::<Sha3_256, BranchChange<CortadoAffine>>(
                     change.clone(),
                     public_zero_art,
                     EligibilityRequirement::Member(public_key),
@@ -169,7 +169,7 @@ impl Validator for LinearValidator {
                     (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(
+                frame.verify_art::<Sha3_256, BranchChange<CortadoAffine>>(
                     change.clone(),
                     public_zero_art,
                     EligibilityRequirement::Member(public_key),
@@ -186,6 +186,7 @@ impl Validator for LinearValidator {
                 Ok(Some(operation))
             }
             frame::GroupOperation::DropGroup(_) => unimplemented!(),
+            frame::GroupOperation::Aggregated(_) => unimplemented!()
         }
     }
 

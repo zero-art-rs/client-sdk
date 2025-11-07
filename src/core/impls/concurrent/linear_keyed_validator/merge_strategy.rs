@@ -13,8 +13,7 @@ use tracing::{debug, info, instrument, trace, warn};
 use zrt_art::{
     art::{ArtAdvancedOps, art_types::PrivateZeroArt},
     changes::{
-        ApplicableChange,
-        branch_change::{BranchChange, MergeBranchChange},
+        ApplicableChange, aggregations::AggregatedChange, branch_change::{BranchChange, MergeBranchChange}
     },
 };
 
@@ -168,6 +167,79 @@ impl LinearKeyedValidator {
     pub(super) fn apply_changes(
         &mut self,
         changes: &BranchChange<CortadoAffine>,
+    ) -> Result<StageKey> {
+        info!("Start apply changes");
+
+        trace!("Initial base stage key: {:?}", self.base_stk);
+        trace!("Initial upstream stage key: {:?}", self.upstream_stk);
+        trace!("Initial base ART: {:?}", self.base_art);
+        trace!("Initial upstream ART: {:?}", self.upstream_art);
+        trace!("Initial epoch: {}", self.epoch);
+
+        // Should never panic
+        let changes_id: ChangesID = Sha3_256::digest(postcard::to_allocvec(&changes)?).to_vec()
+            [..8]
+            .try_into()
+            .unwrap();
+
+        debug!("Changes ID: {:?}", changes_id);
+
+        if self.changes.contains_key(&changes_id) {
+            warn!("Changes already applied");
+            return Err(Error::ChangesAlreadyApplied);
+        }
+
+        // Derive current stk and art
+        let mut upstream_art = self.upstream_art.clone();
+
+        let participant = if let Some(&secret_key) = self.participation_leafs.get(&changes_id) {
+            info!("We advance epoch");
+            upstream_art.update_key(secret_key)?;
+
+            let participant = Participant {
+                id: changes_id,
+                branch: changes.clone(),
+                art: upstream_art.get_private_art().clone(),
+            };
+            Some(participant)
+        } else {
+            info!("Other advance epoch");
+            changes.update(&mut upstream_art)?;
+            None
+        };
+
+        let upstream_stk =
+            derive_stage_key(&self.upstream_stk, upstream_art.get_root_secret_key())?;
+        trace!("Upstream stage key: {:?}", upstream_stk);
+
+        // Advance base
+        self.base_art = self.upstream_art.get_private_art().clone();
+        self.base_stk = self.upstream_stk;
+
+        // Advance current
+        self.upstream_art = upstream_art;
+        self.upstream_stk = upstream_stk;
+
+        self.participant = participant;
+        self.changes = HashMap::new();
+        self.changes.insert(changes_id, changes.clone());
+        self.epoch += 1;
+
+        trace!("Resulted base stage key: {:?}", self.base_stk);
+        trace!("Resulted upstream stage key: {:?}", self.upstream_stk);
+        trace!("Resulted base ART: {:?}", self.base_art);
+        trace!("Resulted upstream ART: {:?}", self.upstream_art);
+        info!("Epoch advanced to: {}", self.epoch);
+
+        info!("End apply changes");
+
+        Ok(self.upstream_stk)
+    }
+
+    #[instrument(skip_all)]
+    pub(super) fn apply_aggregated_change(
+        &mut self,
+        changes: &AggregatedChange<CortadoAffine>,
     ) -> Result<StageKey> {
         info!("Start apply changes");
 

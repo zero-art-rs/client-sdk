@@ -9,6 +9,7 @@ use zrt_art::TreeMethods;
 use zrt_art::art::ArtAdvancedOps;
 use zrt_art::art::art_node::LeafStatus;
 use zrt_art::art::art_types::{PrivateArt, PrivateZeroArt, PublicArt, PublicZeroArt};
+use zrt_art::changes::aggregations::AggregatedChange;
 use zrt_art::changes::branch_change::BranchChange;
 use zrt_art::node_index::NodeIndex;
 use zrt_crypto::schnorr;
@@ -139,7 +140,7 @@ impl KeyedValidator for LinearKeyedValidator {
                     (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(
+                frame.verify_art::<Sha3_256, BranchChange<CortadoAffine>>(
                     change.clone(),
                     public_zero_art,
                     zrt_zk::EligibilityRequirement::Previleged((public_key, vec![])),
@@ -172,7 +173,7 @@ impl KeyedValidator for LinearKeyedValidator {
                     (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(
+                frame.verify_art::<Sha3_256, BranchChange<CortadoAffine>>(
                     change.clone(),
                     public_zero_art,
                     zrt_zk::EligibilityRequirement::Member(public_key),
@@ -238,7 +239,7 @@ impl KeyedValidator for LinearKeyedValidator {
                     (public_zero_art, eligibility)
                 };
 
-                frame.verify_art::<Sha3_256>(change.clone(), public_zero_art, eligibility)?;
+                frame.verify_art::<Sha3_256, BranchChange<CortadoAffine>>(change.clone(), public_zero_art, eligibility)?;
 
                 let member_public_key = if is_next_epoch {
                     self.upstream_art
@@ -291,7 +292,7 @@ impl KeyedValidator for LinearKeyedValidator {
                     (public_zero_art, public_key)
                 };
 
-                frame.verify_art::<Sha3_256>(
+                frame.verify_art::<Sha3_256, BranchChange<CortadoAffine>>(
                     change.clone(),
                     public_zero_art,
                     zrt_zk::EligibilityRequirement::Member(public_key),
@@ -310,6 +311,42 @@ impl KeyedValidator for LinearKeyedValidator {
                 Ok((Some(operation), stage_key))
             }
             frame::GroupOperation::DropGroup(_) => unimplemented!(),
+            frame::GroupOperation::Aggregated(aggregated_change) => {
+                let span = span!(Level::TRACE, "aggregated_change_frame");
+                let _enter = span.enter();
+
+                trace!("Changes: {:?}", aggregated_change);
+
+                let (public_zero_art, public_key) = if is_next_epoch {
+                    let public_zero_art =
+                        PublicZeroArt::new(self.upstream_art.get_public_art().clone());
+                    let public_key = group_owner_leaf_public_key(&self.upstream_art);
+                    (public_zero_art, public_key)
+                } else {
+                    let public_zero_art =
+                        PublicZeroArt::new(self.base_art.get_public_art().clone());
+                    let public_key = group_owner_leaf_public_key(&self.base_art);
+                    trace!("Base owner leaf key: {:?}", public_key);
+                    (public_zero_art, public_key)
+                };
+
+                frame.verify_art::<Sha3_256, AggregatedChange<CortadoAffine>>(
+                    aggregated_change.clone(),
+                    public_zero_art,
+                    zrt_zk::EligibilityRequirement::Previleged((public_key, vec![])),
+                )?;
+                let operation = GroupOperation::AddMember {
+                    member_public_key: *aggregated_change
+                        .public_keys
+                        .last()
+                        .ok_or(Error::InvalidInput)?,
+                };
+                if !is_next_epoch {
+                    return Ok((Some(operation), self.upstream_stk));
+                }
+
+                Ok((Some(operation), self.apply_changes(change)?))
+            }
         }
     }
 
@@ -509,6 +546,40 @@ impl LinearKeyedValidator {
             participant: parts.6,
             participation_leafs: parts.7,
         })
+    }
+    
+    fn handle_add_member() {
+        let span = span!(Level::TRACE, "add_member_frame");
+        let _enter = span.enter();
+
+        trace!("Changes: {:?}", change);
+
+        let (public_zero_art, public_key) = if is_next_epoch {
+            let public_zero_art =
+                PublicZeroArt::new(self.upstream_art.get_public_art().clone());
+            let public_key = group_owner_leaf_public_key(&self.upstream_art);
+            (public_zero_art, public_key)
+        } else {
+            let public_zero_art =
+                PublicZeroArt::new(self.base_art.get_public_art().clone());
+            let public_key = group_owner_leaf_public_key(&self.base_art);
+            trace!("Base owner leaf key: {:?}", public_key);
+            (public_zero_art, public_key)
+        };
+
+        frame.verify_art::<Sha3_256, BranchChange<CortadoAffine>>(
+            change.clone(),
+            public_zero_art,
+            zrt_zk::EligibilityRequirement::Previleged((public_key, vec![])),
+        )?;
+        let operation = GroupOperation::AddMember {
+            member_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
+        };
+        if !is_next_epoch {
+            return Ok((Some(operation), self.upstream_stk));
+        }
+
+        Ok((Some(operation), self.apply_changes(change)?))
     }
 
     pub fn is_participant(&self) -> bool {

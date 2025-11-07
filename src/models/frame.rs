@@ -6,6 +6,7 @@ use prost::Message;
 use sha3::Digest;
 use zrt_art::art::art_types::{PublicArt, PublicZeroArt};
 use zrt_art::changes::VerifiableChange;
+use zrt_art::changes::aggregations::AggregatedChange;
 use zrt_art::changes::branch_change::{BranchChange, BranchChangeType};
 use zrt_crypto::schnorr;
 
@@ -13,6 +14,7 @@ use uuid::Uuid;
 use zrt_zk::EligibilityRequirement;
 use zrt_zk::art::ArtProof;
 
+use crate::types::{FrameId, Identifiable};
 use crate::{
     errors::{Error, Result},
     zero_art_proto,
@@ -53,9 +55,9 @@ impl Frame {
         Ok(())
     }
 
-    pub fn verify_art<D: Digest>(
+    pub fn verify_art<D: Digest, C: VerifiableChange<PublicZeroArt>>(
         &self,
-        branch_change: BranchChange<CortadoAffine>,
+        branch_change: C,
         public_zero_art: PublicZeroArt,
         eligibility_requirement: EligibilityRequirement,
     ) -> Result<()> {
@@ -125,6 +127,16 @@ impl TryFrom<Frame> for zero_art_proto::Frame {
             frame: Some(value.frame_tbs.try_into()?),
             proof,
         })
+    }
+}
+
+impl Identifiable for Frame {
+    type Id = FrameId;
+
+    fn id(&self) -> Self::Id {
+        blake3::hash(&self.encode_to_vec().expect("Failed to serialize Frame"))
+            .as_bytes()
+            .into()
     }
 }
 
@@ -298,6 +310,7 @@ pub enum GroupOperation {
     KeyUpdate(BranchChange<CortadoAffine>),
     LeaveGroup(BranchChange<CortadoAffine>),
     DropGroup(Vec<u8>),
+    Aggregated(AggregatedChange<CortadoAffine>),
 }
 
 impl From<BranchChange<CortadoAffine>> for GroupOperation {
@@ -334,7 +347,9 @@ impl TryFrom<zero_art_proto::GroupOperation> for GroupOperation {
             zero_art_proto::group_operation::Operation::DropGroup(challenge) => {
                 GroupOperation::DropGroup(challenge)
             }
-            zero_art_proto::group_operation::Operation::Aggregated(_) => unimplemented!(),
+            zero_art_proto::group_operation::Operation::Aggregated(aggregate) => {
+                GroupOperation::Aggregated(postcard::from_bytes(&aggregate)?)
+            }
         };
 
         Ok(group_operation)
@@ -371,6 +386,11 @@ impl TryFrom<GroupOperation> for zero_art_proto::GroupOperation {
             }
             GroupOperation::DropGroup(challenge) => {
                 zero_art_proto::group_operation::Operation::DropGroup(challenge)
+            }
+            GroupOperation::Aggregated(aggregate) => {
+                zero_art_proto::group_operation::Operation::Aggregated(postcard::to_allocvec(
+                    &aggregate,
+                )?)
             }
         };
 

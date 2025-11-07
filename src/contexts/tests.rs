@@ -511,7 +511,6 @@ fn test_change_group() {
 
     let (mut group_context, frame) = GroupContext::new(identity_secret_key, owner, group_info)
         .expect("Failed to create group context");
-        
 
     frame
         .verify_schnorr::<Sha3_256>(identity_public_key)
@@ -558,7 +557,6 @@ fn test_send_frame() {
 
     let (mut group_context, frame) = GroupContext::new(identity_secret_key, owner, group_info)
         .expect("Failed to create group context");
-        
 
     frame
         .verify_schnorr::<Sha3_256>(identity_public_key)

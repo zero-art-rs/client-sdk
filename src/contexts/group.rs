@@ -29,7 +29,7 @@ use crate::{
         payload::GroupActionPayload,
         protected_payload::{ProtectedPayload, ProtectedPayloadTbs, Sender},
     },
-    types,
+    types::{self, FrameId},
     utils::{decrypt, derive_invite_key, derive_stage_key, encrypt, serialize},
 };
 
@@ -60,7 +60,7 @@ pub struct GroupContext {
     seq_num: u64,
     nonce: Nonce,
     is_last_sender: bool,
-    sended_frames: BoundedMap<[u8; 32], ()>,
+    sended_frames: BoundedMap<FrameId, ()>,
 
     accept_unverified: bool,
 }
@@ -874,7 +874,6 @@ impl GroupContext {
 
             frame_tbs.prove_schnorr::<Sha3_256>(validator.tree_key())?
         } else {
-
             let mut proposal = validator.propose_update_key()?;
 
             let mut frame_tbs = FrameTbs::new(
