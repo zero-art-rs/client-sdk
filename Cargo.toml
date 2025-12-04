@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-zrt-zk = { git = "https://git@github.com/zero-art-rs/core.git" }
-zrt-art = { git = "https://git@github.com/zero-art-rs/core.git" }
-zrt-crypto = { git = "https://git@github.com/zero-art-rs/core.git" }
-cortado = { git = "https://git@github.com/zero-art-rs/core.git" }
+zrt-zk = { git = "https://git@github.com/zero-art-rs/core.git", branch = "feature/zrt-art-refactor" }
+zrt-art = { git = "https://git@github.com/zero-art-rs/core.git", branch = "feature/zrt-art-refactor" }
+zrt-crypto = { git = "https://git@github.com/zero-art-rs/core.git", branch = "feature/zrt-art-refactor" }
+cortado = { git = "https://git@github.com/zero-art-rs/core.git", branch = "feature/zrt-art-refactor" }
 bulletproofs = { version = "5.0.0", git="https://github.com/zero-art-rs/bulletproofs", features=["yoloproofs"] }
 prost = "0.14.1"
 prost-types = "0.14.1"
@@ -17,6 +17,7 @@ ark-ec = { version = "0.5.0", git = "https://github.com/arkworks-rs/algebra", re
 ark-ff = { version = "0.5.0", git = "https://github.com/arkworks-rs/algebra", rev = "7601bf9" }
 hkdf = "0.12.4"
 sha3 = "0.10.8"
+blake3 = "1.5"
 ark-serialize = { version = "0.5.0", git = "https://github.com/arkworks-rs/algebra", rev = "7601bf9", features = ["serde", "derive"] }
 thiserror = "2.0.16"
 aes-gcm = "0.10.3"

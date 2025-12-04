@@ -1,7 +1,7 @@
 use std::{collections::HashMap, iter::once};
 
 use crate::{
-    core::impls::concurrent::linear_keyed_validator::{LinearKeyedValidator, Participant},
+    core::impls::concurrent::linear_keyed_validator::LinearKeyedValidator,
     errors::{Error, Result},
     types::{ChangesID, StageKey},
     utils::derive_stage_key,
@@ -11,11 +11,8 @@ use cortado::{self, CortadoAffine, Fr as ScalarField};
 use sha3::{Digest, Sha3_256};
 use tracing::{debug, info, instrument, trace, warn};
 use zrt_art::{
-    art::{ArtAdvancedOps, art_types::PrivateZeroArt},
-    changes::{
-        ApplicableChange,
-        branch_change::{BranchChange, MergeBranchChange},
-    },
+    art::{ArtAdvancedOps, PrivateZeroArt},
+    changes::{ApplicableChange, aggregations::AggregatedChange, branch_change::BranchChange},
 };
 
 impl LinearKeyedValidator {
@@ -37,7 +34,7 @@ impl LinearKeyedValidator {
             art: upstream_art.clone(),
         };
 
-        let merge_branch_change = MergeBranchChange::new_for_participant(
+        let merge_branch_change = AggregatedChange::new_for_participant(
             self.base_art.clone(),
             changes.clone(),
             self.changes
@@ -50,7 +47,7 @@ impl LinearKeyedValidator {
         let upstream_stk = derive_stage_key(&self.base_stk, upstream_art.get_root_secret_key())?;
         trace!("Upstream stage key: {:?}", upstream_stk);
 
-        self.upstream_art = PrivateZeroArt::new(
+        self.art = PrivateZeroArt::new(
             upstream_art,
             Box::new(StdRng::from_rng(thread_rng()).unwrap()),
         );
@@ -62,7 +59,7 @@ impl LinearKeyedValidator {
         trace!("Resulted base stage key: {:?}", self.base_stk);
         trace!("Resulted upstream stage key: {:?}", self.upstream_stk);
         trace!("Resulted base ART: {:?}", self.base_art);
-        trace!("Resulted upstream ART: {:?}", self.upstream_art);
+        trace!("Resulted upstream ART: {:?}", self.art);
         trace!("Resulted epoch: {}", self.epoch);
 
         info!("End merge changes");
@@ -79,7 +76,7 @@ impl LinearKeyedValidator {
         trace!("Initial base stage key: {:?}", self.base_stk);
         trace!("Initial upstream stage key: {:?}", self.upstream_stk);
         trace!("Initial base ART: {:?}", self.base_art);
-        trace!("Initial upstream ART: {:?}", self.upstream_art);
+        trace!("Initial upstream ART: {:?}", self.art);
         trace!("Initial epoch: {}", self.epoch);
 
         // Should never panic
@@ -145,7 +142,7 @@ impl LinearKeyedValidator {
         let upstream_stk = derive_stage_key(&self.base_stk, upstream_art.get_root_secret_key())?;
         trace!("Upstream stage key: {:?}", upstream_stk);
 
-        self.upstream_art = PrivateZeroArt::new(
+        self.art = PrivateZeroArt::new(
             upstream_art,
             Box::new(StdRng::from_rng(thread_rng()).unwrap()),
         );
@@ -156,7 +153,7 @@ impl LinearKeyedValidator {
         trace!("Resulted base stage key: {:?}", self.base_stk);
         trace!("Resulted upstream stage key: {:?}", self.upstream_stk);
         trace!("Resulted base ART: {:?}", self.base_art);
-        trace!("Resulted upstream ART: {:?}", self.upstream_art);
+        trace!("Resulted upstream ART: {:?}", self.art);
         trace!("Resulted epoch: {}", self.epoch);
 
         info!("End merge changes");
@@ -174,7 +171,7 @@ impl LinearKeyedValidator {
         trace!("Initial base stage key: {:?}", self.base_stk);
         trace!("Initial upstream stage key: {:?}", self.upstream_stk);
         trace!("Initial base ART: {:?}", self.base_art);
-        trace!("Initial upstream ART: {:?}", self.upstream_art);
+        trace!("Initial upstream ART: {:?}", self.art);
         trace!("Initial epoch: {}", self.epoch);
 
         // Should never panic
@@ -191,7 +188,7 @@ impl LinearKeyedValidator {
         }
 
         // Derive current stk and art
-        let mut upstream_art = self.upstream_art.clone();
+        let mut upstream_art = self.art.clone();
 
         let participant = if let Some(&secret_key) = self.participation_leafs.get(&changes_id) {
             info!("We advance epoch");
@@ -214,11 +211,11 @@ impl LinearKeyedValidator {
         trace!("Upstream stage key: {:?}", upstream_stk);
 
         // Advance base
-        self.base_art = self.upstream_art.get_private_art().clone();
+        self.base_art = self.art.get_private_art().clone();
         self.base_stk = self.upstream_stk;
 
         // Advance current
-        self.upstream_art = upstream_art;
+        self.art = upstream_art;
         self.upstream_stk = upstream_stk;
 
         self.participant = participant;
@@ -229,7 +226,7 @@ impl LinearKeyedValidator {
         trace!("Resulted base stage key: {:?}", self.base_stk);
         trace!("Resulted upstream stage key: {:?}", self.upstream_stk);
         trace!("Resulted base ART: {:?}", self.base_art);
-        trace!("Resulted upstream ART: {:?}", self.upstream_art);
+        trace!("Resulted upstream ART: {:?}", self.art);
         info!("Epoch advanced to: {}", self.epoch);
 
         info!("End apply changes");

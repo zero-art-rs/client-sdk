@@ -1,7 +1,7 @@
 use crate::{
     contexts::group::{GroupContext, Nonce},
-    core::impls::concurrent::linear_keyed_validator::LinearKeyedValidator,
     errors::{Error, Result},
+    keyed_validator::KeyedValidator,
     models::{
         group_info::GroupInfo,
         invite::{Invite, Invitee, ProtectedInviteData},
@@ -9,12 +9,13 @@ use crate::{
     utils::{decrypt, hkdf},
 };
 use ark_ec::{AffineRepr, CurveGroup};
+use ark_std::rand::{SeedableRng, rngs::StdRng, thread_rng};
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use sha3::Sha3_256;
 use tracing::{debug, info, instrument, trace};
 use uuid::Uuid;
-use zrt_art::art::art_types::{PrivateArt, PublicArt};
+use zrt_art::art::{PrivateArt, PrivateZeroArt, PublicArt};
 use zrt_crypto::schnorr;
 
 pub struct InviteContext {
@@ -117,7 +118,12 @@ impl InviteContext {
         let base_art = PrivateArt::new(art, self.leaf_secret)?;
         Ok(GroupContext::from_parts(
             self.identity_secret_key,
-            LinearKeyedValidator::new(base_art, self.stk, self.epoch),
+            KeyedValidator::new(
+                PrivateZeroArt::new(base_art, Box::new(StdRng::from_rng(thread_rng()).unwrap()))
+                    .unwrap(),
+                self.stk,
+                self.epoch,
+            ),
             GroupInfo::new(self.group_id, String::new(), Utc::now(), vec![]),
             0,
             Nonce::new(0),

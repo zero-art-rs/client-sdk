@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use ark_ec::{AffineRepr, CurveGroup};
 use sha3::Sha3_256;
-use zrt_art::art::art_types::PublicArt;
+use zrt_art::art::PublicArt;
 
 use crate::{
     contexts::{group::GroupContext, invite::InviteContext},
@@ -511,7 +511,6 @@ fn test_change_group() {
 
     let (mut group_context, frame) = GroupContext::new(identity_secret_key, owner, group_info)
         .expect("Failed to create group context");
-        
 
     frame
         .verify_schnorr::<Sha3_256>(identity_public_key)
@@ -558,7 +557,6 @@ fn test_send_frame() {
 
     let (mut group_context, frame) = GroupContext::new(identity_secret_key, owner, group_info)
         .expect("Failed to create group context");
-        
 
     frame
         .verify_schnorr::<Sha3_256>(identity_public_key)
@@ -579,10 +577,10 @@ fn test_send_frame() {
 
 #[test]
 fn test_leave_member() {
-    // let _ = tracing_subscriber::fmt()
-    //     .with_max_level(tracing::Level::TRACE) // щоб бачили trace/debug/info
-    //     .with_test_writer() // щоб писало в буфер тестів
-    //     .try_init();
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG) // щоб бачили trace/debug/info
+        .with_test_writer() // щоб писало в буфер тестів
+        .try_init();
     let mut rng = StdRng::seed_from_u64(0);
 
     let group_id = Uuid::new_v4();

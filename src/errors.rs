@@ -34,6 +34,8 @@ pub enum Error {
     InvalidGroup,
     #[error("Invalid length")]
     InvalidLength,
+    #[error("Invalid node")]
+    InvalidNode,
     #[error("Path to the given node does not exist")]
     PathNotFound,
     #[error("Cannot remove the node: insufficient proximity")]

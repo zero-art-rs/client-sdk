@@ -4,7 +4,7 @@ use ark_ec::{AffineRepr, CurveGroup};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use prost::Message;
 use sha3::Digest;
-use zrt_art::art::art_types::{PublicArt, PublicZeroArt};
+use zrt_art::art::{PublicArt, PublicZeroArt};
 use zrt_art::changes::VerifiableChange;
 use zrt_art::changes::branch_change::{BranchChange, BranchChangeType};
 use zrt_crypto::schnorr;
@@ -56,7 +56,7 @@ impl Frame {
     pub fn verify_art<D: Digest>(
         &self,
         branch_change: BranchChange<CortadoAffine>,
-        public_zero_art: PublicZeroArt,
+        public_zero_art: PublicZeroArt<CortadoAffine>,
         eligibility_requirement: EligibilityRequirement,
     ) -> Result<()> {
         match &self.proof {
@@ -235,6 +235,10 @@ impl FrameTbs {
     //         proof: Proof::ArtProof(proof),
     //     })
     // }
+
+    pub fn digest<D: Digest>(&self) -> Result<Vec<u8>> {
+        Ok(D::digest(self.encode_to_vec()?).to_vec())
+    }
 
     // Serialization
     pub fn encode_to_vec(&self) -> Result<Vec<u8>> {
