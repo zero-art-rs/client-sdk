@@ -7,7 +7,7 @@ use std::ops::Deref;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use rand_core::CryptoRngCore;
 use std::sync::Mutex;
-use tracing::{Level, debug, info, instrument, span, trace};
+use tracing::{Level, debug, info, instrument, span, trace, error};
 use zrt_art::art::PublicArt;
 use zrt_crypto::schnorr;
 
@@ -187,7 +187,9 @@ impl<R> GroupContext<R> {
         );
         let _enter = span.enter();
 
-        let (operation, stage_key) = validator.validate_and_derive_key(&frame)?;
+        let (operation, stage_key) = validator
+            .validate_and_derive_key(&frame)
+            .inspect_err(|err| error!("Failed to validate and derive key for a given frame: {}", err))?;
         trace!("Stage key: {:?}", stage_key);
 
         self.is_last_sender = self.sended_frames.contains_key(&frame_id.into());
@@ -197,7 +199,7 @@ impl<R> GroupContext<R> {
             &stage_key,
             frame.frame_tbs().protected_payload(),
             &frame.frame_tbs().associated_data::<Sha3_256>()?,
-        )?)?;
+        )?).inspect_err(|err| error!("Failed to decode protected_payload: {}", err))?;
 
         let Some(operation) = operation else {
             let sender_public_key = match protected_payload.protected_payload_tbs().sender() {
@@ -1010,5 +1012,12 @@ impl<R> GroupContext<R> {
 
     pub fn tree(&self) -> PublicArt<CortadoAffine> {
         self.validator.lock().unwrap().tree().clone()
+    }
+
+    pub fn commited_tree(&self) -> Result<PublicArt<CortadoAffine>> {
+        let mut tree = self.validator.lock().unwrap().tree().clone();
+        tree.commit()?;
+
+        Ok(tree)
     }
 }

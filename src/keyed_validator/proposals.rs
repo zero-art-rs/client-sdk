@@ -1,7 +1,6 @@
-use crate::keyed_validator::group_owner_leaf_public_key_preview;
 use crate::{
     errors::{Error, Result},
-    keyed_validator::{KeyedValidator, group_owner_leaf_public_key},
+    keyed_validator::{KeyedValidator, group_owner_leaf_public_key_preview},
     types::{
         AddMemberProposal, Identifiable, LeaveGroupProposal, RemoveMemberProposal,
         UpdateKeyProposal,
@@ -11,7 +10,7 @@ use crate::{
 use ark_ec::{AffineRepr, CurveGroup};
 use cortado::{self, CortadoAffine, Fr as ScalarField, Fr};
 use std::ops::Mul;
-use tracing::{debug, instrument};
+use tracing::{debug, error, instrument};
 use zrt_art::{
     art::ArtAdvancedOps,
     art_node::{LeafStatus, TreeMethods},
@@ -52,19 +51,23 @@ impl<R> KeyedValidator<R> {
             .leaf_with(leaf_public_key)?
             .clone();
 
-        debug!("Leaf status: {:?}", leaf.status());
+        let own_leaf_public_key = self.leaf_public_key_preview();
+        let owner_leaf_public_key = group_owner_leaf_public_key_preview(self.art.preview().root());
 
-        let is_owner = self.leaf_public_key()
-            != group_owner_leaf_public_key_preview(self.art.preview().root());
+        let is_owner = own_leaf_public_key == owner_leaf_public_key;
 
         let eligibility_artefact = match leaf.status() {
-            None => return Err(Error::Forbidden),
+            None => {
+                error!("Node with LeafStatus = None, is internal, and impossible to remove.");
+                return Err(Error::Forbidden)
+            },
             Some(LeafStatus::Active) => {
                 if is_owner {
                     let leaf_sk = self.art.secrets().preview().leaf();
                     let leaf_pk = CortadoAffine::generator().mul(leaf_sk).into_affine();
                     EligibilityArtefact::Owner((leaf_sk, leaf_pk))
                 } else {
+                    error!("Only owner can remove member with LeafStatus::Active.");
                     return Err(Error::Forbidden);
                 }
             }

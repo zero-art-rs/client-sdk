@@ -1,7 +1,7 @@
 use ark_ff::UniformRand;
 use ark_std::rand::{SeedableRng, rngs::StdRng};
 use chrono::Utc;
-use tracing::trace;
+use tracing::{info, trace};
 use uuid::Uuid;
 
 use ark_ec::{AffineRepr, CurveGroup};
@@ -166,7 +166,8 @@ fn test_join_group() {
         .expect("Failed to create invite context");
 
     let mut member_group_context = invite_context
-        .upgrade(group_context.tree())
+        // .upgrade(group_context.tree())
+        .upgrade(group_context.commited_tree().expect("Public tree must be commitable"))
         .expect("Failed to upgrade group context");
 
     assert_eq!(
@@ -174,6 +175,9 @@ fn test_join_group() {
         0,
         "If invite context was upgraded to group context, members should be empty"
     );
+    // TODO: can't validate frame, which is already applied.
+    // member_group_context.update();
+
     member_group_context
         .process_frame(frame)
         .expect("Failed to process add member frame for member");
@@ -259,7 +263,7 @@ fn test_invite_many_members_and_sync() {
             .expect("Failed to process add member proposal");
 
         frames.push(frame);
-        trees.push(group_context.tree());
+        trees.push(group_context.commited_tree().expect("Public tree must be commitable"));
         invites.push(invite);
     }
 
@@ -395,7 +399,7 @@ fn test_remove_member() {
             .expect("Failed to process add member proposal");
 
         frames.push(frame);
-        trees.push(group_context.tree());
+        trees.push(group_context.commited_tree().expect("Failed to commit tree"));
         invites.push(invite);
     }
 
@@ -447,12 +451,13 @@ fn test_remove_member() {
     contexts[0]
         .process_frame(frame.clone())
         .expect("Failed to process frame");
+    let process_result = contexts[1].process_frame(frame.clone());
     assert!(
         matches!(
-            contexts[1].process_frame(frame.clone()),
-            Err(Error::UserRemovedFromGroup)
+            process_result,
+            Err(Error::UserRemovedFromGroup),
         ),
-        "Should error"
+        "Got {process_result:?}, while expected Err(Error::UserRemovedFromGroup)"
     );
     contexts[2]
         .process_frame(frame.clone())
@@ -625,7 +630,7 @@ fn test_leave_member() {
             .expect("Failed to process add member proposal");
 
         frames.push(frame);
-        trees.push(group_context.tree());
+        trees.push(group_context.commited_tree().expect("Failed to commit tree"));
         invites.push(invite);
     }
 
@@ -668,6 +673,7 @@ fn test_leave_member() {
         }
     }
 
+    info!("Leave group with contexts[3]");
     let frame = contexts[3]
         .leave_group()
         .expect("Failed to propose leave group");

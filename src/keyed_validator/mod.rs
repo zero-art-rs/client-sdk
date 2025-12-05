@@ -2,7 +2,10 @@ use ark_std::rand::rngs::StdRng;
 use ark_std::rand::{Rng, SeedableRng, thread_rng};
 use sha3::{Digest, Sha3_256};
 use std::fmt::{Debug, Formatter};
-use tracing::instrument;
+use std::ops::Mul;
+use ark_ec::{AffineRepr, CurveGroup};
+use ark_serialize::CanonicalDeserialize;
+use tracing::{debug, error, instrument};
 use zrt_art::art::{PrivateArt, PublicArt};
 use zrt_art::art_node::{ArtNode, ArtNodePreview, LeafStatus, TreeMethods};
 use zrt_art::changes::branch_change::{BranchChange, BranchChangeType};
@@ -113,12 +116,45 @@ impl<R> KeyedValidator<R> {
                 return Err(Error::InvalidEpoch);
             }
 
-            // Verify schnorr signature
-            schnorr::verify(
-                signature,
-                &vec![self.art.public_art().preview().root().public_key()],
-                &Sha3_256::digest(frame.frame_tbs().encode_to_vec()?),
-            )?;
+            let frame_operation = frame
+                .frame_tbs()
+                .group_operation();
+
+            match frame_operation {
+                Some(models::frame::GroupOperation::Init(_)) => {
+                    // Verify schnorr signature
+                    let public_key = CortadoAffine::deserialize_compressed(&*frame.frame_tbs().nonce())?;
+
+                    schnorr::verify(
+                        signature,
+                        &vec![public_key],
+                        &Sha3_256::digest(frame.frame_tbs().encode_to_vec()?),
+                    )
+                        .inspect_err(|err| error!(
+                            public_key = ?public_key,
+                            "Failed to verify schnorr signature for GroupOperation::Init: {err}.",
+                        ))?;
+
+                    let operation = GroupOperation::<CortadoAffine>::Init;
+
+                    return Ok((Some(operation), self.upstream_stk));
+                },
+                None => {
+                    // Verify schnorr signature
+                    let public_key = self.art.public_art().root().data().public_key();
+                    // let public_key = self.art.public_art().preview().root().public_key();
+                    schnorr::verify(
+                        signature,
+                        &vec![public_key],
+                        &Sha3_256::digest(frame.frame_tbs().encode_to_vec()?),
+                    )
+                        .inspect_err(|err| error!(
+                            public_key = ?public_key,
+                            "Failed to verify schnorr signature for GroupOperation::Init: {err}.",
+                        ))?;
+                },
+                _ => todo!()
+            }
 
             return Ok((None, self.upstream_stk));
         }
@@ -146,16 +182,11 @@ impl<R> KeyedValidator<R> {
                 (change, eligibility_requirement, operation)
             }
             (models::frame::GroupOperation::AddMember(change), false) => {
-                let eligibility_requirement = EligibilityRequirement::Previleged((
-                    group_owner_leaf_public_key(self.art.public_art()),
-                    vec![],
-                ));
-
                 let operation = GroupOperation::AddMember {
                     member_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
 
-                (change, eligibility_requirement, operation)
+                return Ok((Some(operation), self.upstream_stk))
             }
             (models::frame::GroupOperation::KeyUpdate(change), true) => {
                 let eligibility_requirement = EligibilityRequirement::Member(
@@ -194,6 +225,10 @@ impl<R> KeyedValidator<R> {
                 (change, eligibility_requirement, operation)
             }
             (models::frame::GroupOperation::RemoveMember(change), true) => {
+                if self.art.node_index().eq(&change.node_index) {
+                    return Err(Error::UserRemovedFromGroup)
+                }
+
                 let root = self.art.public_art().preview().root();
                 let eligibility_requirement = match self
                     .art
@@ -226,6 +261,10 @@ impl<R> KeyedValidator<R> {
                 (change, eligibility_requirement, operation)
             }
             (models::frame::GroupOperation::RemoveMember(change), false) => {
+                if self.art.node_index().eq(&change.node_index) {
+                    return Err(Error::UserRemovedFromGroup)
+                }
+
                 let eligibility_requirement = match self
                     .art
                     .public_art()
@@ -256,13 +295,17 @@ impl<R> KeyedValidator<R> {
                 (change, eligibility_requirement, operation)
             }
             (models::frame::GroupOperation::LeaveGroup(change), true) => {
+                // if self.art.node_index().eq(&change.node_index) {
+                //     return Err(Error::UserRemovedFromGroup)
+                // }
+
                 let eligibility_requirement = EligibilityRequirement::Member(
                     self.art.preview().node(&change.node_index)?.public_key(),
                 );
 
-                let old_public_key = self.art.node(&change.node_index)?.data().public_key();
+                let old_public_key = self.art.preview().node(&change.node_index)?.public_key();
                 let new_public_key = *change.public_keys.last().ok_or(Error::InvalidInput)?;
-                let operation = GroupOperation::RemoveMember {
+                let operation = GroupOperation::LeaveGroup {
                     old_public_key,
                     new_public_key,
                 };
@@ -270,13 +313,17 @@ impl<R> KeyedValidator<R> {
                 (change, eligibility_requirement, operation)
             }
             (models::frame::GroupOperation::LeaveGroup(change), false) => {
+                // if self.art.node_index().eq(&change.node_index) {
+                //     return Err(Error::UserRemovedFromGroup)
+                // }
+
                 let eligibility_requirement = EligibilityRequirement::Member(
                     self.art.node(&change.node_index)?.data().public_key(),
                 );
 
-                let old_public_key = self.art.node(&change.node_index)?.data().public_key();
+                let old_public_key = self.art.preview().node(&change.node_index)?.public_key();
                 let new_public_key = *change.public_keys.last().ok_or(Error::InvalidInput)?;
-                let operation = GroupOperation::RemoveMember {
+                let operation = GroupOperation::LeaveGroup {
                     old_public_key,
                     new_public_key,
                 };
@@ -289,10 +336,17 @@ impl<R> KeyedValidator<R> {
         // let eligibility_requirement =
         //     get_eligibility_requirement(self.art.public_art(), change, is_next_epoch)?;
         let verification_branch = if is_next_epoch {
-            self.art.preview().verification_branch(change)
+            self
+                .art
+                .preview()
+                .verification_branch(change)
+                .inspect_err(|err| error!("Failed to retrieve verification branch for next epoch: {}", err))?
         } else {
-            self.art.verification_branch(change)
-        }?;
+            self
+                .art
+                .verification_branch(change)
+                .inspect_err(|err| error!("Failed to retrieve verification branch for current epoch: {}", err))?
+        };
 
         self.verifier_engine
             .new_context(eligibility_requirement)
@@ -307,9 +361,13 @@ impl<R> KeyedValidator<R> {
         }
 
         let root_secret_key = if let Some(secret_key) = self.participation_leafs.get(&change.id()) {
-            secret_key.apply(&mut self.art)?
+            secret_key
+                .apply(&mut self.art)
+                .inspect_err(|err| error!("Fail to apply own key update or leave: {err}"))?
         } else {
-            change.apply(&mut self.art)?
+            change
+                .apply(&mut self.art)
+                .inspect_err(|err| error!("Fail to apply change: {err}"))?
         };
 
         // let root_secret_key = change.apply(&mut self.art)?;
@@ -359,6 +417,11 @@ impl<R> KeyedValidator<R> {
         self.art.leaf_public_key()
     }
 
+    pub fn leaf_public_key_preview(&self) -> CortadoAffine {
+        let leaf_key_preview = self.art.secrets().preview().leaf();
+        CortadoAffine::generator().mul(leaf_key_preview).into_affine()
+    }
+
     pub fn stage_key(&self) -> StageKey {
         self.upstream_stk
     }
@@ -369,6 +432,10 @@ impl<R> KeyedValidator<R> {
 
     pub fn tree_key(&self) -> ScalarField {
         self.art.root_secret_key()
+    }
+
+    pub fn tree_key_preview(&self) -> ScalarField {
+        self.art.secrets().preview().root()
     }
 }
 
