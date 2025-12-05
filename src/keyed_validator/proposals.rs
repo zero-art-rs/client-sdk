@@ -21,7 +21,7 @@ impl<R> KeyedValidator<R> {
     #[instrument(skip_all, fields(current_epoch = %self.epoch))]
     pub fn propose_add_member(&mut self, leaf_secret: ScalarField) -> Result<AddMemberProposal> {
         let owner_leaf_public_key = group_owner_leaf_public_key_preview(self.art.preview().root());
-        if self.leaf_public_key() != owner_leaf_public_key {
+        if self.leaf_public_key() == owner_leaf_public_key {
             return Err(Error::Forbidden);
         }
 
