@@ -1,19 +1,19 @@
 use ark_std::rand::rngs::StdRng;
 use ark_std::rand::{Rng, SeedableRng, thread_rng};
 use sha3::{Digest, Sha3_256};
+use std::fmt::{Debug, Formatter};
 use tracing::instrument;
 use zrt_art::art::{PrivateArt, PublicArt};
-use zrt_art::art_node::{
-    ArtNode, ArtNodePreview, LeafIter, LeafIterWithPath, LeafStatus, TreeMethods,
-    TreeNodeIterWithPath,
-};
+use zrt_art::art_node::{ArtNode, ArtNodePreview, LeafStatus, TreeMethods};
 use zrt_art::changes::branch_change::{BranchChange, BranchChangeType};
 use zrt_art::node_index::NodeIndex;
 use zrt_crypto::schnorr;
 use zrt_zk::EligibilityRequirement;
 use zrt_zk::engine::{ZeroArtProverEngine, ZeroArtVerifierEngine};
 
-use crate::types::ChangeID;
+use crate::contexts::group::GroupContext;
+use crate::types::{ChangeID, Identifiable, Proposal};
+use crate::utils::derive_stage_key;
 use crate::{
     bounded_map::BoundedMap,
     errors::{Error, Result},
@@ -23,8 +23,12 @@ use crate::{
 };
 use crate::{errors, models};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
+use prost_types::field_descriptor_proto::Type::Group;
+use rand_core::CryptoRngCore;
+use zrt_art::changes::ApplicableChange;
+use zrt_zk::art::ArtProof;
 
-mod handlers;
+// mod handlers;
 // mod merge_strategy;
 mod proposals;
 
@@ -43,6 +47,18 @@ pub struct KeyedValidator<R> {
     rng: R,
 }
 
+impl<R> Debug for KeyedValidator<R> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyedValidator")
+            .field("art", &self.art)
+            .field("upstream_stk", &self.upstream_stk)
+            .field("base_stk", &self.base_stk)
+            .field("epoch", &self.epoch)
+            .field("participation_leafs", &self.participation_leafs)
+            .finish()
+    }
+}
+
 impl<R> KeyedValidator<R> {
     pub fn validate(&mut self, frame: &frame::Frame) -> Result<ValidationResult> {
         let (result, _) = self.validate_and_derive_key(frame)?;
@@ -54,11 +70,29 @@ impl<R> KeyedValidator<R> {
     }
 
     pub fn tree_public_key(&self) -> CortadoAffine {
-        self.art.public_art().root().public_key()
+        self.art.public_art().root().data().public_key()
     }
 
     pub fn epoch(&self) -> u64 {
         self.epoch
+    }
+
+    pub fn prove(
+        &mut self,
+        proposal: &Proposal<CortadoAffine>,
+        associated_data: &[u8],
+    ) -> Result<ArtProof>
+    where
+        R: CryptoRngCore,
+    {
+        let art_proof = self
+            .prover_engine
+            .new_context(proposal.eligibility_artefact.clone())
+            .for_branch(&proposal.prover_branch)
+            .with_associated_data(associated_data)
+            .prove(&mut self.rng)?;
+
+        Ok(art_proof)
     }
 }
 
@@ -94,74 +128,166 @@ impl<R> KeyedValidator<R> {
             models::frame::Proof::SchnorrSignature(_) => unreachable!(),
         };
 
-        let (change, eligibility_requirement, operation) = match (frame
+        let frame_operation = frame
             .frame_tbs()
             .group_operation()
-            .ok_or(Error::InvalidInput)?, is_next_epoch) {
-        (models::frame::GroupOperation::AddMember(change), true) => {
-            let eligibility = EligibilityRequirement::Previleged((
-            group_owner_leaf_public_key_preview(self.art.public_art().preview().root()),
-            vec![],
-        ));
-        
-    },
-        (models::frame::GroupOperation::AddMember(change), false) => {
-            EligibilityRequirement::Previleged((group_owner_leaf_public_key(self.art.public_art()), vec![]))
-        }
-        (models::frame::GroupOperation::KeyUpdate(change), true) => {
-            EligibilityRequirement::Member(self.art.public_art().preview().node(&change.node_index)?.public_key())
-        }
-        (models::frame::GroupOperation::KeyUpdate(change), false) => {
-            EligibilityRequirement::Member(self.art.public_art().node(&change.node_index)?.public_key())
-        }
-        (models::frame::GroupOperation::RemoveMember(change), true) => {
-            let root = self.art.public_art().preview().root();
-            match self.art
-                .public_art()
-                .preview()
-                .node(&change.node_index)?
-                .status()
-                .ok_or(Error::InvalidNode)?
-            {
-                LeafStatus::Active => EligibilityRequirement::Previleged((
-                    group_owner_leaf_public_key_preview(root),
+            .ok_or(Error::InvalidInput)?;
+        let (change, eligibility_requirement, operation) = match (frame_operation, is_next_epoch) {
+            (models::frame::GroupOperation::AddMember(change), true) => {
+                let eligibility_requirement = EligibilityRequirement::Previleged((
+                    group_owner_leaf_public_key_preview(self.art.public_art().preview().root()),
                     vec![],
-                )),
-                LeafStatus::Blank => {
-                    EligibilityRequirement::Member(root.public_key())
-                }
-                LeafStatus::PendingRemoval => {
-                    EligibilityRequirement::Member(root.public_key())
-                }
-            }
-        }
-        (models::frame::GroupOperation::RemoveMember(change), false) => {
-            match art
-                .node(&change.node_index)?
-                .status()
-                .ok_or(Error::InvalidNode)?
-            {
-                LeafStatus::Active => EligibilityRequirement::Previleged((
-                    group_owner_leaf_public_key(art.root()),
-                    vec![],
-                )),
-                LeafStatus::Blank => EligibilityRequirement::Member(art.root().public_key()),
-                LeafStatus::PendingRemoval => {
-                    EligibilityRequirement::Member(art.root().public_key())
-                }
-            }
-        }
-        (models::frame::GroupOperation::LeaveGroup(change), true) => {
-            EligibilityRequirement::Member(art.preview().node(&change.node_index)?.public_key())
-        }
-        (models::frame::GroupOperation::LeaveGroup(change), false) => {
-            EligibilityRequirement::Member(art.node(&change.node_index)?.public_key())
-        }
-        (_, _) => unimplemented!()
-    };
+                ));
 
-        let eligibility_requirement =
-            get_eligibility_requirement(self.art.public_art(), change, is_next_epoch)?;
+                let operation = GroupOperation::AddMember {
+                    member_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
+                };
+
+                (change, eligibility_requirement, operation)
+            }
+            (models::frame::GroupOperation::AddMember(change), false) => {
+                let eligibility_requirement = EligibilityRequirement::Previleged((
+                    group_owner_leaf_public_key(self.art.public_art()),
+                    vec![],
+                ));
+
+                let operation = GroupOperation::AddMember {
+                    member_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
+                };
+
+                (change, eligibility_requirement, operation)
+            }
+            (models::frame::GroupOperation::KeyUpdate(change), true) => {
+                let eligibility_requirement = EligibilityRequirement::Member(
+                    self.art
+                        .public_art()
+                        .preview()
+                        .node(&change.node_index)?
+                        .public_key(),
+                );
+
+                let old_public_key = self.art.preview().node(&change.node_index)?.public_key();
+                let new_public_key = *change.public_keys.last().ok_or(Error::InvalidInput)?;
+                let operation = GroupOperation::KeyUpdate {
+                    old_public_key,
+                    new_public_key,
+                };
+
+                (change, eligibility_requirement, operation)
+            }
+            (models::frame::GroupOperation::KeyUpdate(change), false) => {
+                let eligibility_requirement = EligibilityRequirement::Member(
+                    self.art
+                        .public_art()
+                        .node(&change.node_index)?
+                        .data()
+                        .public_key(),
+                );
+
+                let old_public_key = self.art.node(&change.node_index)?.data().public_key();
+                let new_public_key = *change.public_keys.last().ok_or(Error::InvalidInput)?;
+                let operation = GroupOperation::KeyUpdate {
+                    old_public_key,
+                    new_public_key,
+                };
+
+                (change, eligibility_requirement, operation)
+            }
+            (models::frame::GroupOperation::RemoveMember(change), true) => {
+                let root = self.art.public_art().preview().root();
+                let eligibility_requirement = match self
+                    .art
+                    .public_art()
+                    .preview()
+                    .node(&change.node_index)?
+                    .status()
+                    .ok_or(Error::InvalidNode)?
+                {
+                    LeafStatus::Active => EligibilityRequirement::Previleged((
+                        group_owner_leaf_public_key_preview(root),
+                        vec![],
+                    )),
+                    LeafStatus::Blank => EligibilityRequirement::Member(root.public_key()),
+                    LeafStatus::PendingRemoval => EligibilityRequirement::Member(root.public_key()),
+                };
+
+                let old_public_key = self
+                    .art
+                    .public_art()
+                    .preview()
+                    .node(&change.node_index)?
+                    .public_key();
+                let new_public_key = *change.public_keys.last().ok_or(Error::InvalidInput)?;
+                let operation = GroupOperation::RemoveMember {
+                    old_public_key,
+                    new_public_key,
+                };
+
+                (change, eligibility_requirement, operation)
+            }
+            (models::frame::GroupOperation::RemoveMember(change), false) => {
+                let eligibility_requirement = match self
+                    .art
+                    .public_art()
+                    .node(&change.node_index)?
+                    .data()
+                    .status()
+                    .ok_or(Error::InvalidNode)?
+                {
+                    LeafStatus::Active => EligibilityRequirement::Previleged((
+                        group_owner_leaf_public_key(self.art.root()),
+                        vec![],
+                    )),
+                    LeafStatus::Blank => {
+                        EligibilityRequirement::Member(self.art.root().data().public_key())
+                    }
+                    LeafStatus::PendingRemoval => {
+                        EligibilityRequirement::Member(self.art.root().data().public_key())
+                    }
+                };
+
+                let old_public_key = self.art.node(&change.node_index)?.data().public_key();
+                let new_public_key = *change.public_keys.last().ok_or(Error::InvalidInput)?;
+                let operation = GroupOperation::RemoveMember {
+                    old_public_key,
+                    new_public_key,
+                };
+
+                (change, eligibility_requirement, operation)
+            }
+            (models::frame::GroupOperation::LeaveGroup(change), true) => {
+                let eligibility_requirement = EligibilityRequirement::Member(
+                    self.art.preview().node(&change.node_index)?.public_key(),
+                );
+
+                let old_public_key = self.art.node(&change.node_index)?.data().public_key();
+                let new_public_key = *change.public_keys.last().ok_or(Error::InvalidInput)?;
+                let operation = GroupOperation::RemoveMember {
+                    old_public_key,
+                    new_public_key,
+                };
+
+                (change, eligibility_requirement, operation)
+            }
+            (models::frame::GroupOperation::LeaveGroup(change), false) => {
+                let eligibility_requirement = EligibilityRequirement::Member(
+                    self.art.node(&change.node_index)?.data().public_key(),
+                );
+
+                let old_public_key = self.art.node(&change.node_index)?.data().public_key();
+                let new_public_key = *change.public_keys.last().ok_or(Error::InvalidInput)?;
+                let operation = GroupOperation::RemoveMember {
+                    old_public_key,
+                    new_public_key,
+                };
+
+                (change, eligibility_requirement, operation)
+            }
+            (_, _) => unimplemented!(),
+        };
+
+        // let eligibility_requirement =
+        //     get_eligibility_requirement(self.art.public_art(), change, is_next_epoch)?;
         let verification_branch = if is_next_epoch {
             self.art.preview().verification_branch(change)
         } else {
@@ -173,14 +299,44 @@ impl<R> KeyedValidator<R> {
             .for_branch(&verification_branch)
             .with_associated_data(&frame.frame_tbs().digest::<Sha3_256>()?)
             .verify(proof)
-            .map_err(|_| Error::InvalidInput);
+            .map_err(|_| Error::InvalidInput)?;
 
-        let art_backup = self.art.clone();
         if is_next_epoch {
-            self.art.commit()?
+            self.art.commit()?;
+            self.epoch += 1;
         }
 
-        Err(Error::AesError)
+        let root_secret_key = if let Some(secret_key) = self.participation_leafs.get(&change.id()) {
+            secret_key.apply(&mut self.art)?
+        } else {
+            change.apply(&mut self.art)?
+        };
+
+        // let root_secret_key = change.apply(&mut self.art)?;
+        // self.art.apply::<BranchChange<_>, _>(&change)?;
+
+        let stage_key = if is_next_epoch {
+            let stage_key = derive_stage_key(&self.upstream_stk, root_secret_key)?;
+            // let upstream_stk =
+            //     derive_stage_key(&self.upstream_stk, self.art.secrets().preview().root())?;
+
+            self.base_stk = self.upstream_stk;
+            self.upstream_stk = stage_key;
+
+            stage_key
+        } else {
+            let stage_key = derive_stage_key(&self.base_stk, root_secret_key)?;
+            let upstream_stk = derive_stage_key(&self.base_stk, self.art.secrets().preview().root())?;
+
+            self.upstream_stk = upstream_stk;
+
+            stage_key
+        };
+
+
+        Ok((Some(operation), stage_key))
+
+        // Err(Error::AesError)
     }
 
     pub fn sign_with_leaf_key(&self, message: &[u8]) -> Result<Vec<u8>> {
@@ -216,7 +372,7 @@ impl<R> KeyedValidator<R> {
     }
 }
 
-impl<R: Rng> KeyedValidator<R> {
+impl<R> KeyedValidator<R> {
     pub fn new(art: PrivateArt<CortadoAffine>, base_stk: StageKey, epoch: u64, rng: R) -> Self {
         Self {
             art,
@@ -233,22 +389,14 @@ impl<R: Rng> KeyedValidator<R> {
     pub fn serialize(&self) -> Result<Vec<u8>> {
         type Parts = (
             PrivateArt<CortadoAffine>,
-            PrivateArt<CortadoAffine>,
-            AggregationNode<bool>,
-            Vec<BranchChange<CortadoAffine>>,
             StageKey,
             StageKey,
             u64,
             BoundedMap<ChangeID, ScalarField>,
         );
 
-        let private_zero_art_parts = self.art.clone().into_parts();
-
         let parts: Parts = (
-            private_zero_art_parts.0,
-            private_zero_art_parts.1,
-            private_zero_art_parts.2,
-            private_zero_art_parts.3,
+            self.art.clone(),
             self.upstream_stk,
             self.base_stk,
             self.epoch,
@@ -257,12 +405,9 @@ impl<R: Rng> KeyedValidator<R> {
         postcard::to_allocvec(&parts).map_err(|e| e.into())
     }
 
-    pub fn deserialize(value: &[u8]) -> Result<Self> {
+    pub fn deserialize(value: &[u8], rng: R) -> Result<Self> {
         type Parts = (
             PrivateArt<CortadoAffine>,
-            PrivateArt<CortadoAffine>,
-            AggregationNode<bool>,
-            Vec<BranchChange<CortadoAffine>>,
             StageKey,
             StageKey,
             u64,
@@ -271,22 +416,19 @@ impl<R: Rng> KeyedValidator<R> {
         let parts: Parts = postcard::from_bytes(value).map_err(|_| errors::Error::InvalidInput)?;
 
         Ok(Self {
-            art: PrivateZeroArt::recover(
-                parts.0,
-                parts.1,
-                parts.2,
-                parts.3,
-                Box::new(StdRng::from_rng(thread_rng()).unwrap()),
-            )?,
-            upstream_stk: parts.4,
-            base_stk: parts.5,
-            epoch: parts.6,
-            participation_leafs: parts.7,
+            art: parts.0,
+            upstream_stk: parts.1,
+            base_stk: parts.2,
+            epoch: parts.3,
+            participation_leafs: parts.4,
+            prover_engine: Default::default(),
+            verifier_engine: Default::default(),
+            rng,
         })
     }
 
     pub fn node_index(&self) -> &NodeIndex {
-        &self.art.get_node_index()
+        &self.art.node_index()
     }
 }
 
@@ -296,20 +438,19 @@ mod tests;
 fn group_owner_leaf_public_key<A: TreeMethods<Node = ArtNode<CortadoAffine>>>(
     art: &A,
 ) -> CortadoAffine {
-    LeafIter::new(art.root())
+    art.root()
+        .leaf_iter()
         .next()
         .expect("ART can't be empty")
+        .data()
         .public_key()
 }
 
 fn group_owner_leaf_public_key_preview(art: ArtNodePreview<CortadoAffine>) -> CortadoAffine {
-    for (node, _) in TreeNodeIterWithPath::new(art) {
-        if node.is_leaf() {
-            return node.public_key();
-        }
-    }
-
-    panic!("ART can't be empty")
+    art.leaf_iter()
+        .next()
+        .expect("ART can't be empty")
+        .public_key()
 }
 
 fn get_eligibility_requirement(
@@ -329,7 +470,7 @@ fn get_eligibility_requirement(
             EligibilityRequirement::Member(art.preview().node(&change.node_index)?.public_key())
         }
         (BranchChangeType::UpdateKey, false) => {
-            EligibilityRequirement::Member(art.node(&change.node_index)?.public_key())
+            EligibilityRequirement::Member(art.node(&change.node_index)?.data().public_key())
         }
         (BranchChangeType::RemoveMember, true) => {
             match art
@@ -353,6 +494,7 @@ fn get_eligibility_requirement(
         (BranchChangeType::RemoveMember, false) => {
             match art
                 .node(&change.node_index)?
+                .data()
                 .status()
                 .ok_or(Error::InvalidNode)?
             {
@@ -360,9 +502,9 @@ fn get_eligibility_requirement(
                     group_owner_leaf_public_key(art.root()),
                     vec![],
                 )),
-                LeafStatus::Blank => EligibilityRequirement::Member(art.root().public_key()),
+                LeafStatus::Blank => EligibilityRequirement::Member(art.root().data().public_key()),
                 LeafStatus::PendingRemoval => {
-                    EligibilityRequirement::Member(art.root().public_key())
+                    EligibilityRequirement::Member(art.root().data().public_key())
                 }
             }
         }
@@ -370,7 +512,7 @@ fn get_eligibility_requirement(
             EligibilityRequirement::Member(art.preview().node(&change.node_index)?.public_key())
         }
         (BranchChangeType::Leave, false) => {
-            EligibilityRequirement::Member(art.node(&change.node_index)?.public_key())
+            EligibilityRequirement::Member(art.node(&change.node_index)?.data().public_key())
         }
     };
 

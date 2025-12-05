@@ -4,8 +4,7 @@ use ark_ec::{AffineRepr, CurveGroup};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use prost::Message;
 use sha3::Digest;
-use zrt_art::art::{PublicArt, PublicZeroArt};
-use zrt_art::changes::VerifiableChange;
+use zrt_art::art::{PublicArt};
 use zrt_art::changes::branch_change::{BranchChange, BranchChangeType};
 use zrt_crypto::schnorr;
 
@@ -53,23 +52,24 @@ impl Frame {
         Ok(())
     }
 
-    pub fn verify_art<D: Digest>(
-        &self,
-        branch_change: BranchChange<CortadoAffine>,
-        public_zero_art: PublicZeroArt<CortadoAffine>,
-        eligibility_requirement: EligibilityRequirement,
-    ) -> Result<()> {
-        match &self.proof {
-            Proof::SchnorrSignature(_) => return Err(Error::InvalidVerificationMethod),
-            Proof::ArtProof(proof) => branch_change.verify(
-                &public_zero_art,
-                &D::digest(self.frame_tbs.encode_to_vec()?),
-                eligibility_requirement,
-                proof,
-            )?,
-        }
-        Ok(())
-    }
+    // pub fn verify_art<D: Digest>(
+    //     &self,
+    //     branch_change: BranchChange<CortadoAffine>,
+    //     public_zero_art: PublicArt<CortadoAffine>,
+    //     eligibility_requirement: EligibilityRequirement,
+    //
+    // ) -> Result<()> {
+    //     match &self.proof {
+    //         Proof::SchnorrSignature(_) => return Err(Error::InvalidVerificationMethod),
+    //         Proof::ArtProof(proof) => branch_change.verify(
+    //             &public_zero_art,
+    //             &D::digest(self.frame_tbs.encode_to_vec()?),
+    //             eligibility_requirement,
+    //             proof,
+    //         )?,
+    //     }
+    //     Ok(())
+    // }
 
     // Serialization
     pub fn encode_to_vec(&self) -> Result<Vec<u8>> {

@@ -2,18 +2,14 @@ use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::UniformRand;
 use ark_std::rand::{SeedableRng, rngs::StdRng, thread_rng};
 use chrono::Utc;
-
+use std::fmt::{Debug, Formatter};
+use std::ops::Deref;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
+use rand_core::CryptoRngCore;
 use std::sync::Mutex;
 use tracing::{Level, debug, info, instrument, span, trace};
-use zrt_art::{
-    art::{PrivateZeroArt, PublicArt},
-    changes::ProvableChange,
-};
+use zrt_art::art::PublicArt;
 use zrt_crypto::schnorr;
-
-use serde::{Deserialize, Serialize};
-use sha3::{Digest, Sha3_256};
 
 use crate::{
     bounded_map::BoundedMap,
@@ -30,6 +26,9 @@ use crate::{
     types,
     utils::{decrypt, derive_invite_key, derive_stage_key, encrypt, serialize},
 };
+use serde::{Deserialize, Serialize};
+use sha3::{Digest, Sha3_256};
+use zrt_art::art::PrivateArt;
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct Nonce(u64);
@@ -51,9 +50,9 @@ impl Nonce {
 }
 
 #[derive(Debug)]
-pub struct GroupContext {
+pub struct GroupContext<R> {
     identity_secret_key: ScalarField,
-    validator: Mutex<KeyedValidator>,
+    validator: Mutex<KeyedValidator<R>>,
     group_info: GroupInfo,
     seq_num: u64,
     nonce: Nonce,
@@ -63,7 +62,7 @@ pub struct GroupContext {
     accept_unverified: bool,
 }
 
-impl GroupContext {
+impl GroupContext<StdRng> {
     #[instrument(skip_all)]
     pub fn new(
         identity_secret_key: ScalarField,
@@ -84,11 +83,8 @@ impl GroupContext {
         let leaf_key = (CortadoAffine::generator() * leaf_secret).into_affine();
         trace!(leaf_secret = ?leaf_secret, leaf_key = ?leaf_key, "Generate ART key pair");
         debug!("Making ART");
-        let base_art = PrivateZeroArt::setup(
-            &vec![leaf_secret],
-            Box::new(StdRng::from_rng(thread_rng()).unwrap()),
-        )?;
-        let base_stk = derive_stage_key(&[0u8; 32], base_art.get_root_secret_key())?;
+        let base_art = PrivateArt::setup(&vec![leaf_secret])?;
+        let base_stk = derive_stage_key(&[0u8; 32], base_art.root_secret_key())?;
         // trace!(art = ?base_art, stage_key = ?base_stk, "Intitialize ART and stage key");
 
         user.role = Role::Ownership;
@@ -102,9 +98,7 @@ impl GroupContext {
             group_info.id(),
             0,
             serialize((CortadoAffine::generator() * identity_secret_key).into_affine())?,
-            Some(GroupOperation::Init(
-                base_art.get_base_art().get_public_art().clone(),
-            )),
+            Some(GroupOperation::Init(base_art.public_art().clone())),
             vec![],
         );
         let protected_payload = encrypt(
@@ -120,7 +114,12 @@ impl GroupContext {
         Ok((
             Self {
                 identity_secret_key,
-                validator: Mutex::new(KeyedValidator::new(base_art, base_stk, 0)),
+                validator: Mutex::new(KeyedValidator::new(
+                    base_art,
+                    base_stk,
+                    0,
+                    StdRng::from_rng(thread_rng()).unwrap(),
+                )),
                 group_info,
                 seq_num: 0,
                 nonce: Nonce(0),
@@ -131,8 +130,10 @@ impl GroupContext {
             frame,
         ))
     }
+}
 
-    pub fn into_parts(self) -> (ScalarField, KeyedValidator, GroupInfo, u64, Nonce) {
+impl<R> GroupContext<R> {
+    pub fn into_parts(self) -> (ScalarField, KeyedValidator<R>, GroupInfo, u64, Nonce) {
         (
             self.identity_secret_key,
             self.validator.into_inner().unwrap(),
@@ -145,7 +146,7 @@ impl GroupContext {
     pub fn to_parts(&self) -> (ScalarField, Vec<u8>, GroupInfo, u64, Nonce) {
         (
             self.identity_secret_key,
-            self.validator.lock().unwrap().serialize().unwrap(),
+            self.validator.lock().unwrap().deref().serialize().unwrap(),
             self.group_info.clone(),
             self.seq_num,
             self.nonce,
@@ -154,7 +155,7 @@ impl GroupContext {
 
     pub fn from_parts(
         identity_secret_key: ScalarField,
-        validator: KeyedValidator,
+        validator: KeyedValidator<R>,
         group_info: GroupInfo,
         seq_num: u64,
         nonce: Nonce,
@@ -483,7 +484,10 @@ impl GroupContext {
     }
 
     #[instrument(skip_all)]
-    pub fn add_member(&mut self, invitee: Invitee, content: Vec<u8>) -> Result<(Frame, Invite)> {
+    pub fn add_member(&mut self, invitee: Invitee, content: Vec<u8>) -> Result<(Frame, Invite)>
+    where
+        R: CryptoRngCore,
+    {
         let mut validator = self.validator.lock().unwrap();
         // Future epoch
         let epoch = validator.epoch() + 1;
@@ -512,9 +516,7 @@ impl GroupContext {
             self.group_info.id(),
             epoch,
             self.nonce.advance(),
-            Some(GroupOperation::AddMember(
-                proposal.change.get_branch_change().clone().into(),
-            )),
+            Some(GroupOperation::AddMember(proposal.change.clone().into())),
             vec![],
         );
 
@@ -535,9 +537,9 @@ impl GroupContext {
 
         // Proving
         let proof = Proof::ArtProof(
-            proposal
-                .change
-                .prove(&Sha3_256::digest(frame_tbs.encode_to_vec()?), None)?,
+            validator.prove(&proposal, &Sha3_256::digest(frame_tbs.encode_to_vec()?))?, // proposal
+                                                                                        //     .change
+                                                                                        //     .prove(&Sha3_256::digest(frame_tbs.encode_to_vec()?), None)?,
         );
         let frame = Frame::new(frame_tbs, proof);
 
@@ -567,7 +569,10 @@ impl GroupContext {
     }
 
     #[instrument(skip_all)]
-    pub fn remove_member(&mut self, user_id: &str, content: Vec<u8>) -> Result<Frame> {
+    pub fn remove_member(&mut self, user_id: &str, content: Vec<u8>) -> Result<Frame>
+    where
+        R: CryptoRngCore,
+    {
         let mut validator = self.validator.lock().unwrap();
 
         // Future epoch
@@ -607,9 +612,7 @@ impl GroupContext {
             self.group_info.id(),
             epoch,
             self.nonce.advance(),
-            Some(GroupOperation::RemoveMember(
-                proposal.change.get_branch_change().clone().into(),
-            )),
+            Some(GroupOperation::RemoveMember(proposal.change.clone().into())),
             vec![],
         );
 
@@ -623,9 +626,7 @@ impl GroupContext {
 
         // Proving
         let proof = Proof::ArtProof(
-            proposal
-                .change
-                .prove(&Sha3_256::digest(frame_tbs.encode_to_vec()?), None)?,
+            validator.prove(&proposal, &Sha3_256::digest(frame_tbs.encode_to_vec()?))?,
         );
         let frame = Frame::new(frame_tbs, proof);
 
@@ -636,7 +637,10 @@ impl GroupContext {
     }
 
     #[instrument(skip_all)]
-    pub fn create_frame(&mut self, content: Vec<u8>) -> Result<Frame> {
+    pub fn create_frame(&mut self, content: Vec<u8>) -> Result<Frame>
+    where
+        R: CryptoRngCore,
+    {
         let mut validator = self.validator.lock().unwrap();
 
         let protected_payload_tbs = ProtectedPayloadTbs::new(
@@ -676,9 +680,7 @@ impl GroupContext {
                 self.group_info.id(),
                 validator.epoch() + 1,
                 self.nonce.advance(),
-                Some(GroupOperation::KeyUpdate(
-                    proposal.change.get_branch_change().clone().into(),
-                )),
+                Some(GroupOperation::KeyUpdate(proposal.change.clone().into())),
                 vec![],
             );
 
@@ -690,9 +692,7 @@ impl GroupContext {
             frame_tbs.set_protected_payload(encrypted_protected_payload);
 
             let proof = Proof::ArtProof(
-                proposal
-                    .change
-                    .prove(&Sha3_256::digest(frame_tbs.encode_to_vec()?), None)?,
+                validator.prove(&proposal, &Sha3_256::digest(frame_tbs.encode_to_vec()?))?,
             );
             Frame::new(frame_tbs, proof)
         };
@@ -704,7 +704,10 @@ impl GroupContext {
     }
 
     #[instrument(skip_all)]
-    pub fn leave_group(&mut self) -> Result<Frame> {
+    pub fn leave_group(&mut self) -> Result<Frame>
+    where
+        R: CryptoRngCore,
+    {
         let mut validator = self.validator.lock().unwrap();
 
         let protected_payload_tbs = ProtectedPayloadTbs::new(
@@ -723,9 +726,7 @@ impl GroupContext {
             self.group_info.id(),
             validator.epoch() + 1,
             self.nonce.advance(),
-            Some(GroupOperation::LeaveGroup(
-                proposal.change.get_branch_change().clone().into(),
-            )),
+            Some(GroupOperation::LeaveGroup(proposal.change.clone().into())),
             vec![],
         );
 
@@ -737,9 +738,7 @@ impl GroupContext {
         frame_tbs.set_protected_payload(encrypted_protected_payload);
 
         let proof = Proof::ArtProof(
-            proposal
-                .change
-                .prove(&Sha3_256::digest(frame_tbs.encode_to_vec()?), None)?,
+            validator.prove(&proposal, &Sha3_256::digest(frame_tbs.encode_to_vec()?))?,
         );
         let frame = Frame::new(frame_tbs, proof);
 
@@ -750,7 +749,10 @@ impl GroupContext {
     }
 
     #[instrument(skip_all)]
-    pub fn change_user(&mut self, name: Option<String>, picture: Option<Vec<u8>>) -> Result<Frame> {
+    pub fn change_user(&mut self, name: Option<String>, picture: Option<Vec<u8>>) -> Result<Frame>
+    where
+        R: CryptoRngCore,
+    {
         let mut validator = self.validator.lock().unwrap();
 
         let mut user = self
@@ -805,9 +807,7 @@ impl GroupContext {
                 self.group_info.id(),
                 validator.epoch() + 1,
                 self.nonce.advance(),
-                Some(GroupOperation::KeyUpdate(
-                    proposal.change.get_branch_change().clone().into(),
-                )),
+                Some(GroupOperation::KeyUpdate(proposal.change.clone().into())),
                 vec![],
             );
 
@@ -819,9 +819,7 @@ impl GroupContext {
             frame_tbs.set_protected_payload(encrypted_protected_payload);
 
             let proof = Proof::ArtProof(
-                proposal
-                    .change
-                    .prove(&Sha3_256::digest(frame_tbs.encode_to_vec()?), None)?,
+                validator.prove(&proposal, &Sha3_256::digest(frame_tbs.encode_to_vec()?))?,
             );
             Frame::new(frame_tbs, proof)
         };
@@ -833,11 +831,10 @@ impl GroupContext {
     }
 
     #[instrument(skip_all)]
-    pub fn change_group(
-        &mut self,
-        name: Option<String>,
-        picture: Option<Vec<u8>>,
-    ) -> Result<Frame> {
+    pub fn change_group(&mut self, name: Option<String>, picture: Option<Vec<u8>>) -> Result<Frame>
+    where
+        R: CryptoRngCore,
+    {
         let mut validator = self.validator.lock().unwrap();
 
         let mut group_info = self.group_info.clone();
@@ -887,9 +884,7 @@ impl GroupContext {
                 self.group_info.id(),
                 validator.epoch() + 1,
                 self.nonce.advance(),
-                Some(GroupOperation::KeyUpdate(
-                    proposal.change.get_branch_change().clone().into(),
-                )),
+                Some(GroupOperation::KeyUpdate(proposal.change.clone().into())),
                 vec![],
             );
 
@@ -901,9 +896,7 @@ impl GroupContext {
             frame_tbs.set_protected_payload(encrypted_protected_payload);
 
             let proof = Proof::ArtProof(
-                proposal
-                    .change
-                    .prove(&Sha3_256::digest(frame_tbs.encode_to_vec()?), None)?,
+                validator.prove(&proposal, &Sha3_256::digest(frame_tbs.encode_to_vec()?))?,
             );
             Frame::new(frame_tbs, proof)
         };
@@ -915,7 +908,10 @@ impl GroupContext {
     }
 
     #[instrument(skip_all)]
-    pub fn join_group_as(&mut self, mut user: User) -> Result<Frame> {
+    pub fn join_group_as(&mut self, mut user: User) -> Result<Frame>
+    where
+        R: CryptoRngCore,
+    {
         let mut validator = self.validator.lock().unwrap();
 
         *user.leaf_key_mut() = validator.leaf_public_key();
@@ -939,9 +935,7 @@ impl GroupContext {
             self.group_info.id(),
             epoch,
             self.nonce.advance(),
-            Some(GroupOperation::KeyUpdate(
-                proposal.change.get_branch_change().clone().into(),
-            )),
+            Some(GroupOperation::KeyUpdate(proposal.change.clone().into())),
             vec![],
         );
 
@@ -953,9 +947,7 @@ impl GroupContext {
         frame_tbs.set_protected_payload(encrypted_protected_payload);
 
         let proof = Proof::ArtProof(
-            proposal
-                .change
-                .prove(&Sha3_256::digest(frame_tbs.encode_to_vec()?), None)?,
+            validator.prove(&proposal, &Sha3_256::digest(frame_tbs.encode_to_vec()?))?,
         );
 
         let frame = Frame::new(frame_tbs, proof);

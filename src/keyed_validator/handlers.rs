@@ -23,14 +23,12 @@ impl<R> KeyedValidator<R> {
     ) -> Result<ValidationWithKeyResult> {
         let owner_public_key = group_owner_leaf_public_key(self.art.public_art());
 
-        let verifier = ZeroArtVerifierEngine::default();
-
         let proof = match frame.proof() {
             models::frame::Proof::ArtProof(proof) => proof,
             models::frame::Proof::SchnorrSignature(_) => return Err(Error::ArtLogicError),
         };
 
-        verifier
+        self.verifier_engine
             .new_context(EligibilityRequirement::Previleged((
                 owner_public_key,
                 vec![],
@@ -38,7 +36,7 @@ impl<R> KeyedValidator<R> {
             .for_branch(&self.art.verification_branch(change)?)
             .with_associated_data(&Sha3_256::digest(frame.frame_tbs().encode_to_vec()?))
             .verify(proof)
-            .map_err(|_| Error::InvalidInput);
+            .map_err(|_| Error::InvalidInput)?;
 
         let operation = GroupOperation::AddMember {
             member_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,

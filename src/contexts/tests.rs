@@ -263,7 +263,7 @@ fn test_invite_many_members_and_sync() {
         invites.push(invite);
     }
 
-    let mut contexts: Vec<GroupContext> = Vec::with_capacity(members_secrets.len());
+    let mut contexts: Vec<GroupContext<StdRng>> = Vec::with_capacity(members_secrets.len());
 
     for (i, secret_key) in members_secrets.iter().enumerate() {
         let invite_context = InviteContext::new(*secret_key, None, invites[i].clone())
@@ -399,7 +399,7 @@ fn test_remove_member() {
         invites.push(invite);
     }
 
-    let mut contexts: Vec<GroupContext> = Vec::with_capacity(members_secrets.len());
+    let mut contexts: Vec<GroupContext<StdRng>> = Vec::with_capacity(members_secrets.len());
 
     for (i, secret_key) in members_secrets.iter().enumerate() {
         let invite_context = InviteContext::new(*secret_key, None, invites[i].clone())
@@ -629,7 +629,7 @@ fn test_leave_member() {
         invites.push(invite);
     }
 
-    let mut contexts: Vec<GroupContext> = Vec::with_capacity(members_secrets.len());
+    let mut contexts: Vec<GroupContext<StdRng>> = Vec::with_capacity(members_secrets.len());
 
     for (i, secret_key) in members_secrets.iter().enumerate() {
         let invite_context = InviteContext::new(*secret_key, None, invites[i].clone())

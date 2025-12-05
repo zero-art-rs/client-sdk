@@ -1,3 +1,4 @@
+use crate::keyed_validator::group_owner_leaf_public_key_preview;
 use crate::{
     errors::{Error, Result},
     keyed_validator::{KeyedValidator, group_owner_leaf_public_key},
@@ -7,28 +8,33 @@ use crate::{
     },
     utils::{derive_leaf_key, derive_stage_key},
 };
-use cortado::{self, CortadoAffine, Fr as ScalarField};
+use ark_ec::{AffineRepr, CurveGroup};
+use cortado::{self, CortadoAffine, Fr as ScalarField, Fr};
+use std::ops::Mul;
 use tracing::{debug, instrument};
 use zrt_art::{
     art::ArtAdvancedOps,
     art_node::{LeafStatus, TreeMethods},
 };
+use zrt_zk::EligibilityArtefact;
 
-impl KeyedValidator {
+impl<R> KeyedValidator<R> {
     #[instrument(skip_all, fields(current_epoch = %self.epoch))]
     pub fn propose_add_member(&mut self, leaf_secret: ScalarField) -> Result<AddMemberProposal> {
-        if self.leaf_public_key() != group_owner_leaf_public_key(self.art.get_upstream_art()) {
+        let owner_leaf_public_key = group_owner_leaf_public_key_preview(self.art.preview().root());
+        if self.leaf_public_key() != owner_leaf_public_key {
             return Err(Error::Forbidden);
         }
 
-        let mut art = self.art.clone();
-        art.commit()?;
-
-        let change = art.add_member(leaf_secret)?;
+        let (tk, change, prover_branch) = self.art.add_member(leaf_secret)?;
+        let leaf_sk = self.art.secrets().preview().leaf();
+        let leaf_pk = CortadoAffine::generator().mul(leaf_sk).into_affine();
 
         Ok(AddMemberProposal {
-            stage_key: derive_stage_key(&self.upstream_stk, change.get_root_secret())?,
+            stage_key: derive_stage_key(&self.upstream_stk, tk)?,
+            prover_branch,
             change,
+            eligibility_artefact: EligibilityArtefact::Owner((leaf_sk, leaf_pk)),
         })
     }
 
@@ -40,66 +46,96 @@ impl KeyedValidator {
     ) -> Result<RemoveMemberProposal> {
         let leaf = self
             .art
-            .get_upstream_art()
-            .get_leaf_with(leaf_public_key)?
+            .public_art()
+            .preview()
+            .root()
+            .leaf_with(leaf_public_key)?
             .clone();
 
-        debug!("Leaf status: {:?}", leaf.get_status());
+        debug!("Leaf status: {:?}", leaf.status());
 
-        if self.leaf_public_key() != group_owner_leaf_public_key(self.art.get_upstream_art())
-            && matches!(leaf.get_status(), Some(LeafStatus::Active))
-        {
-            return Err(Error::Forbidden);
-        }
+        let is_owner = self.leaf_public_key()
+            != group_owner_leaf_public_key_preview(self.art.preview().root());
 
-        let change = self.art.remove_member(
+        let eligibility_artefact = match leaf.status() {
+            None => return Err(Error::Forbidden),
+            Some(LeafStatus::Active) => {
+                if is_owner {
+                    let leaf_sk = self.art.secrets().preview().leaf();
+                    let leaf_pk = CortadoAffine::generator().mul(leaf_sk).into_affine();
+                    EligibilityArtefact::Owner((leaf_sk, leaf_pk))
+                } else {
+                    return Err(Error::Forbidden);
+                }
+            }
+            Some(LeafStatus::Blank | LeafStatus::PendingRemoval) => {
+                let root_sk = self.art.secrets().preview().root();
+                let root_pk = CortadoAffine::generator().mul(root_sk).into_affine();
+                EligibilityArtefact::Member((root_sk, root_pk))
+            }
+        };
+
+        let (tk, change, prover_branch) = self.art.remove_member(
             &self
                 .art
-                .get_upstream_art()
-                .get_path_to_leaf_with(leaf_public_key)?
+                .public_art()
+                .preview()
+                .root()
+                .path_to_leaf_with(leaf_public_key)?
                 .into(),
             vanishing_secret_key,
         )?;
 
-        debug!("Eligibility artefact: {:?}", change.get_eligibility());
-        debug!("Change ID: {}", change.id());
+        // debug!("Eligibility artefact: {:?}", change.get_eligibility());
+        // debug!("Change ID: {}", change.id());
 
         Ok(RemoveMemberProposal {
-            stage_key: derive_stage_key(&self.upstream_stk, change.get_root_secret())?,
+            stage_key: derive_stage_key(&self.upstream_stk, tk)?,
+            prover_branch,
             change,
+            eligibility_artefact,
         })
     }
 
     pub fn propose_update_key(&mut self) -> Result<UpdateKeyProposal> {
-        let secret_key = derive_leaf_key(
-            &self.upstream_stk,
-            self.art.get_upstream_art().get_leaf_secret_key(),
-        )?;
+        let secret_key = derive_leaf_key(&self.upstream_stk, self.art.secrets().preview().leaf())?;
 
-        let change = self.art.update_key(secret_key)?;
+        let (tk, change, prover_branch) = self.art.update_key(secret_key)?;
 
-        let stage_key = derive_stage_key(&self.upstream_stk, change.get_root_secret())?;
+        let stage_key = derive_stage_key(&self.upstream_stk, tk)?;
 
         self.participation_leafs.insert(change.id(), secret_key);
 
-        Ok(UpdateKeyProposal { change, stage_key })
+        let leaf_sk = self.art.secrets().preview().leaf();
+        let leaf_pk = CortadoAffine::generator().mul(leaf_sk).into_affine();
+        let eligibility_artefact = EligibilityArtefact::Member((leaf_sk, leaf_pk));
+
+        Ok(UpdateKeyProposal {
+            change,
+            stage_key,
+            prover_branch,
+            eligibility_artefact,
+        })
     }
 
     pub fn propose_leave_group(&mut self) -> Result<UpdateKeyProposal> {
-        let secret_key = derive_leaf_key(
-            &self.upstream_stk,
-            self.art.get_upstream_art().get_leaf_secret_key(),
-        )?;
+        let secret_key = derive_leaf_key(&self.upstream_stk, self.art.secrets().preview().leaf())?;
 
-        let change = self.art.leave_group(secret_key)?;
+        let (tk, change, prover_branch) = self.art.leave_group(secret_key)?;
 
-        let stage_key = derive_stage_key(&self.upstream_stk, change.get_root_secret())?;
+        let stage_key = derive_stage_key(&self.upstream_stk, tk)?;
 
         self.participation_leafs.insert(change.id(), secret_key);
 
+        let leaf_sk = self.art.secrets().preview().leaf();
+        let leaf_pk = CortadoAffine::generator().mul(leaf_sk).into_affine();
+        let eligibility_artefact = EligibilityArtefact::Member((leaf_sk, leaf_pk));
+
         Ok(LeaveGroupProposal {
-            change: change,
+            change,
             stage_key,
+            prover_branch,
+            eligibility_artefact,
         })
     }
 }

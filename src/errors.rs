@@ -3,6 +3,7 @@ use bulletproofs::r1cs::R1CSError;
 use prost::{DecodeError, UnknownEnumValue};
 use thiserror::Error;
 use zrt_art::errors::ArtError;
+use zrt_zk::errors::ZKError;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -56,6 +57,8 @@ pub enum Error {
     UserRemovedFromGroup,
     #[error("User don't have permission for action")]
     Forbidden,
+    #[error("Failure in prover core")]
+    ZK(#[from] ZKError),
 
     #[error("Changes already applied or merged")]
     ChangesAlreadyApplied,

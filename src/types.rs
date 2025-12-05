@@ -1,3 +1,4 @@
+use crate::models::frame::Proof;
 use ark_ec::AffineRepr;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use blake3;
@@ -5,6 +6,8 @@ use cortado::CortadoAffine;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use zrt_art::changes::branch_change::{BranchChange, PrivateBranchChange};
+use zrt_zk::EligibilityArtefact;
+use zrt_zk::art::ProverNodeData;
 
 #[derive(Debug)]
 pub enum GroupOperation<G: AffineRepr + CanonicalSerialize + CanonicalDeserialize> {
@@ -29,8 +32,10 @@ pub enum GroupOperation<G: AffineRepr + CanonicalSerialize + CanonicalDeserializ
 
 // #[derive(Debug)]
 pub struct Proposal<G: AffineRepr + CanonicalSerialize + CanonicalDeserialize> {
-    pub change: PrivateBranchChange<G>,
+    pub change: BranchChange<G>,
     pub stage_key: StageKey,
+    pub prover_branch: Vec<ProverNodeData<CortadoAffine>>,
+    pub eligibility_artefact: EligibilityArtefact,
 }
 
 pub type AddMemberProposal = Proposal<CortadoAffine>;
@@ -110,6 +115,6 @@ impl<G: AffineRepr + CanonicalSerialize> Identifiable for PrivateBranchChange<G>
     type Id = ChangeID;
 
     fn id(&self) -> Self::Id {
-        self.get_branch_change().id()
+        self.change().id()
     }
 }
