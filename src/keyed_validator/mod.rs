@@ -5,7 +5,7 @@ use std::fmt::{Debug, Formatter};
 use std::ops::Mul;
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_serialize::CanonicalDeserialize;
-use tracing::{debug, error, instrument};
+use tracing::{debug, error, instrument, trace};
 use zrt_art::art::{PrivateArt, PublicArt};
 use zrt_art::art_node::{ArtNode, ArtNodePreview, LeafStatus, TreeMethods};
 use zrt_art::changes::branch_change::{BranchChange, BranchChangeType};
@@ -204,6 +204,13 @@ impl<R> KeyedValidator<R> {
                     new_public_key,
                 };
 
+                trace!(
+                    old_public_key = ?old_public_key,
+                    new_public_key = ?new_public_key,
+                    is_next_epoch = ?is_next_epoch,
+                    "KeyUpdate GroupOperation data"
+                );
+
                 (change, eligibility_requirement, operation)
             }
             (models::frame::GroupOperation::KeyUpdate(change), false) => {
@@ -221,6 +228,13 @@ impl<R> KeyedValidator<R> {
                     old_public_key,
                     new_public_key,
                 };
+
+                trace!(
+                    old_public_key = ?old_public_key,
+                    new_public_key = ?new_public_key,
+                    is_next_epoch = ?is_next_epoch,
+                    "KeyUpdate GroupOperation data"
+                );
 
                 (change, eligibility_requirement, operation)
             }
