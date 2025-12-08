@@ -155,7 +155,7 @@ impl<R> KeyedValidator<R> {
                 }
                 None => {
                     // Verify schnorr signature
-                    let public_key = self.art.public_art().root().data().public_key();
+                    let public_key = self.art.public_art().preview().root().public_key();
                     // let public_key = self.art.public_art().preview().root().public_key();
                     schnorr::verify(
                         signature,
