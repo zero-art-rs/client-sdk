@@ -134,6 +134,13 @@ impl GroupContext<StdRng> {
 
 impl<R> GroupContext<R> {
     pub fn into_parts(self) -> (ScalarField, KeyedValidator<R>, GroupInfo, u64, Nonce) {
+        debug!(
+            identity_secret_key = ?self.identity_secret_key,
+            group_info = ?self.group_info,
+            seq_num = ?self.seq_num,
+            nonce = ?self.nonce,
+            "into_parts data"
+        );
         (
             self.identity_secret_key,
             self.validator.into_inner().unwrap(),
@@ -144,6 +151,13 @@ impl<R> GroupContext<R> {
     }
 
     pub fn to_parts(&self) -> (ScalarField, Vec<u8>, GroupInfo, u64, Nonce) {
+        debug!(
+            identity_secret_key = ?self.identity_secret_key,
+            group_info = ?self.group_info,
+            seq_num = ?self.seq_num,
+            nonce = ?self.nonce,
+            "to_parts data"
+        );
         (
             self.identity_secret_key,
             self.validator.lock().unwrap().deref().serialize().unwrap(),
@@ -1005,14 +1019,14 @@ impl<R> GroupContext<R> {
         let validator = self.validator.lock().unwrap();
 
         debug!(
-            tree_key = ?validator.tree_key(),
-            tree_public_key = ?validator.tree_public_key(),
+            tree_key = ?validator.tree_key_preview(),
+            tree_public_key = ?validator.tree_public_key_preview(),
             "sign_with_tk"
         );
 
         Ok(schnorr::sign(
-            &vec![validator.tree_key()],
-            &vec![validator.tree_public_key()],
+            &vec![validator.tree_key_preview()],
+            &vec![validator.tree_public_key_preview()],
             msg,
         )?)
     }

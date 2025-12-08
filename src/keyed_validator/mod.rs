@@ -76,6 +76,10 @@ impl<R> KeyedValidator<R> {
         self.art.public_art().root().data().public_key()
     }
 
+    pub fn tree_public_key_preview(&self) -> CortadoAffine {
+        self.art.public_art().preview().root().public_key()
+    }
+
     pub fn epoch(&self) -> u64 {
         self.epoch
     }
