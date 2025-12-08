@@ -1003,6 +1003,13 @@ impl<R> GroupContext<R> {
 
     pub fn sign_with_tk(&self, msg: &[u8]) -> Result<Vec<u8>> {
         let validator = self.validator.lock().unwrap();
+
+        debug!(
+            tree_key = ?validator.tree_key(),
+            tree_public_key = ?validator.tree_public_key(),
+            "sign_with_tk"
+        );
+
         Ok(schnorr::sign(
             &vec![validator.tree_key()],
             &vec![validator.tree_public_key()],

@@ -82,6 +82,11 @@ impl InviteContext {
     }
 
     pub fn sign_as_identity(&self, msg: &[u8]) -> Result<Vec<u8>> {
+        debug!(
+            identity_secret_key = ?self.identity_secret_key,
+            identity_public_key = ?self.identity_public_key(),
+            "sign_as_identity"
+        );
         Ok(schnorr::sign(
             &vec![self.identity_secret_key],
             &vec![self.identity_public_key()],
@@ -90,6 +95,11 @@ impl InviteContext {
     }
 
     pub fn sign_as_leaf(&self, msg: &[u8]) -> Result<Vec<u8>> {
+        debug!(
+            identity_secret_key = ?self.leaf_secret,
+            identity_public_key = ?self.leaf_public_key(),
+            "sign_as_leaf"
+        );
         Ok(schnorr::sign(
             &vec![self.leaf_secret],
             &vec![self.leaf_public_key()],

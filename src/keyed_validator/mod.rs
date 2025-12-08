@@ -204,13 +204,6 @@ impl<R> KeyedValidator<R> {
                     new_public_key,
                 };
 
-                trace!(
-                    old_public_key = ?old_public_key,
-                    new_public_key = ?new_public_key,
-                    is_next_epoch = ?is_next_epoch,
-                    "KeyUpdate GroupOperation data"
-                );
-
                 (change, eligibility_requirement, operation)
             }
             (models::frame::GroupOperation::KeyUpdate(change), false) => {
@@ -228,13 +221,6 @@ impl<R> KeyedValidator<R> {
                     old_public_key,
                     new_public_key,
                 };
-
-                trace!(
-                    old_public_key = ?old_public_key,
-                    new_public_key = ?new_public_key,
-                    is_next_epoch = ?is_next_epoch,
-                    "KeyUpdate GroupOperation data"
-                );
 
                 (change, eligibility_requirement, operation)
             }
@@ -346,6 +332,12 @@ impl<R> KeyedValidator<R> {
             }
             (_, _) => unimplemented!(),
         };
+
+        debug!(
+            operation = ?operation,
+            is_next_epoch = ?is_next_epoch,
+            "GroupOperation data"
+        );
 
         // let eligibility_requirement =
         //     get_eligibility_requirement(self.art.public_art(), change, is_next_epoch)?;

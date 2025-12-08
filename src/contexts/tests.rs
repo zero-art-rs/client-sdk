@@ -1,7 +1,7 @@
 use ark_ff::UniformRand;
 use ark_std::rand::{SeedableRng, rngs::StdRng};
 use chrono::Utc;
-use tracing::{info, trace};
+use tracing::{debug, error, info, trace};
 use uuid::Uuid;
 
 use ark_ec::{AffineRepr, CurveGroup};
@@ -351,10 +351,10 @@ fn test_invite_many_members_and_sync() {
 
 #[test]
 fn test_remove_member() {
-    // let _ = tracing_subscriber::fmt()
-    //     .with_max_level(tracing::Level::TRACE) // щоб бачили trace/debug/info
-    //     .with_test_writer() // щоб писало в буфер тестів
-    //     .try_init();
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE) // щоб бачили trace/debug/info
+        .with_test_writer() // щоб писало в буфер тестів
+        .try_init();
     let mut rng = StdRng::seed_from_u64(0);
 
     let group_id = Uuid::new_v4();
@@ -583,7 +583,8 @@ fn test_send_frame() {
 #[test]
 fn test_leave_member() {
     let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG) // щоб бачили trace/debug/info
+        // .with_max_level(tracing::Level::TRACE) // щоб бачили trace/debug/info
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_test_writer() // щоб писало в буфер тестів
         .try_init();
     let mut rng = StdRng::seed_from_u64(0);
