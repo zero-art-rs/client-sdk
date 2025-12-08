@@ -1,10 +1,10 @@
+use ark_ec::{AffineRepr, CurveGroup};
+use ark_serialize::CanonicalDeserialize;
 use ark_std::rand::rngs::StdRng;
 use ark_std::rand::{Rng, SeedableRng, thread_rng};
 use sha3::{Digest, Sha3_256};
 use std::fmt::{Debug, Formatter};
 use std::ops::Mul;
-use ark_ec::{AffineRepr, CurveGroup};
-use ark_serialize::CanonicalDeserialize;
 use tracing::{debug, error, instrument, trace};
 use zrt_art::art::{PrivateArt, PublicArt};
 use zrt_art::art_node::{ArtNode, ArtNodePreview, LeafStatus, TreeMethods};
@@ -104,45 +104,55 @@ impl<R> KeyedValidator<R> {
 }
 
 impl<R> KeyedValidator<R> {
-    #[instrument(skip_all, name = "validate", fields(current_epoch = %self.epoch, frame_epoch = %frame.frame_tbs().epoch()))]
+    #[instrument(skip_all, target = "validator", level = "debug", fields(frame_id = %frame.id()))]
     pub fn validate_and_derive_key(
         &mut self,
         frame: &frame::Frame,
     ) -> Result<ValidationWithKeyResult> {
+        debug!(
+            epoch = self.epoch,
+            frame_epoch = frame.frame_tbs().epoch(),
+            "Start frame validation and key derivation"
+        );
+
         let frame_epoch = frame.frame_tbs().epoch();
         let is_next_epoch = frame_epoch == self.epoch + 1;
         if frame_epoch != self.epoch && !is_next_epoch {
             return Err(Error::InvalidEpoch);
         }
 
+        debug!(is_next_epoch);
+
         if let models::frame::Proof::SchnorrSignature(signature) = frame.proof() {
+            debug!("Frame proof is schnorr signature");
             if is_next_epoch {
                 return Err(Error::InvalidEpoch);
             }
 
-            let frame_operation = frame
-                .frame_tbs()
-                .group_operation();
+            let frame_operation = frame.frame_tbs().group_operation();
 
             match frame_operation {
                 Some(models::frame::GroupOperation::Init(_)) => {
                     // Verify schnorr signature
-                    let public_key = CortadoAffine::deserialize_compressed(&*frame.frame_tbs().nonce())?;
+                    let public_key =
+                        CortadoAffine::deserialize_compressed(&*frame.frame_tbs().nonce())?;
 
                     schnorr::verify(
                         signature,
                         &vec![public_key],
                         &Sha3_256::digest(frame.frame_tbs().encode_to_vec()?),
                     )
-                        .inspect_err(|err| error!(
+                    .inspect_err(|err| {
+                        error!(
                             public_key = ?public_key,
                             "Failed to verify schnorr signature for GroupOperation::Init: {err}.",
-                        ))?;
+                        )
+                    })?;
 
                     let operation = GroupOperation::<CortadoAffine>::Init;
 
                     return Ok((Some(operation), self.upstream_stk));
-                },
+                }
                 None => {
                     // Verify schnorr signature
                     let public_key = self.art.public_art().root().data().public_key();
@@ -152,12 +162,14 @@ impl<R> KeyedValidator<R> {
                         &vec![public_key],
                         &Sha3_256::digest(frame.frame_tbs().encode_to_vec()?),
                     )
-                        .inspect_err(|err| error!(
+                    .inspect_err(|err| {
+                        error!(
                             public_key = ?public_key,
                             "Failed to verify schnorr signature for GroupOperation::Init: {err}.",
-                        ))?;
-                },
-                _ => todo!()
+                        )
+                    })?;
+                }
+                _ => todo!(),
             }
 
             return Ok((None, self.upstream_stk));
@@ -190,7 +202,7 @@ impl<R> KeyedValidator<R> {
                     member_public_key: *change.public_keys.last().ok_or(Error::InvalidInput)?,
                 };
 
-                return Ok((Some(operation), self.upstream_stk))
+                return Ok((Some(operation), self.upstream_stk));
             }
             (models::frame::GroupOperation::KeyUpdate(change), true) => {
                 let eligibility_requirement = EligibilityRequirement::Member(
@@ -230,7 +242,7 @@ impl<R> KeyedValidator<R> {
             }
             (models::frame::GroupOperation::RemoveMember(change), true) => {
                 if self.art.node_index().eq(&change.node_index) {
-                    return Err(Error::UserRemovedFromGroup)
+                    return Err(Error::UserRemovedFromGroup);
                 }
 
                 let root = self.art.public_art().preview().root();
@@ -266,7 +278,7 @@ impl<R> KeyedValidator<R> {
             }
             (models::frame::GroupOperation::RemoveMember(change), false) => {
                 if self.art.node_index().eq(&change.node_index) {
-                    return Err(Error::UserRemovedFromGroup)
+                    return Err(Error::UserRemovedFromGroup);
                 }
 
                 let eligibility_requirement = match self
@@ -346,16 +358,22 @@ impl<R> KeyedValidator<R> {
         // let eligibility_requirement =
         //     get_eligibility_requirement(self.art.public_art(), change, is_next_epoch)?;
         let verification_branch = if is_next_epoch {
-            self
-                .art
+            self.art
                 .preview()
                 .verification_branch(change)
-                .inspect_err(|err| error!("Failed to retrieve verification branch for next epoch: {}", err))?
+                .inspect_err(|err| {
+                    error!(
+                        "Failed to retrieve verification branch for next epoch: {}",
+                        err
+                    )
+                })?
         } else {
-            self
-                .art
-                .verification_branch(change)
-                .inspect_err(|err| error!("Failed to retrieve verification branch for current epoch: {}", err))?
+            self.art.verification_branch(change).inspect_err(|err| {
+                error!(
+                    "Failed to retrieve verification branch for current epoch: {}",
+                    err
+                )
+            })?
         };
 
         self.verifier_engine
@@ -394,13 +412,13 @@ impl<R> KeyedValidator<R> {
             stage_key
         } else {
             let stage_key = derive_stage_key(&self.base_stk, root_secret_key)?;
-            let upstream_stk = derive_stage_key(&self.base_stk, self.art.secrets().preview().root())?;
+            let upstream_stk =
+                derive_stage_key(&self.base_stk, self.art.secrets().preview().root())?;
 
             self.upstream_stk = upstream_stk;
 
             stage_key
         };
-
 
         Ok((Some(operation), stage_key))
 
@@ -429,7 +447,9 @@ impl<R> KeyedValidator<R> {
 
     pub fn leaf_public_key_preview(&self) -> CortadoAffine {
         let leaf_key_preview = self.art.secrets().preview().leaf();
-        CortadoAffine::generator().mul(leaf_key_preview).into_affine()
+        CortadoAffine::generator()
+            .mul(leaf_key_preview)
+            .into_affine()
     }
 
     pub fn stage_key(&self) -> StageKey {

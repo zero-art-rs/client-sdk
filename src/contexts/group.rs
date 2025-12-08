@@ -2,15 +2,16 @@ use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::UniformRand;
 use ark_std::rand::{SeedableRng, rngs::StdRng, thread_rng};
 use chrono::Utc;
-use std::fmt::{Debug, Formatter};
-use std::ops::Deref;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use rand_core::CryptoRngCore;
+use std::fmt::{Debug, Formatter};
+use std::ops::Deref;
 use std::sync::Mutex;
-use tracing::{Level, debug, info, instrument, span, trace, error};
+use tracing::{Level, debug, error, info, instrument, span, trace};
 use zrt_art::art::PublicArt;
 use zrt_crypto::schnorr;
 
+use crate::models::frame::FrameId;
 use crate::{
     bounded_map::BoundedMap,
     errors::{Error, Result},
@@ -57,7 +58,7 @@ pub struct GroupContext<R> {
     seq_num: u64,
     nonce: Nonce,
     is_last_sender: bool,
-    sended_frames: BoundedMap<[u8; 32], ()>,
+    sended_frames: BoundedMap<FrameId, ()>,
 
     accept_unverified: bool,
 }
@@ -186,34 +187,32 @@ impl<R> GroupContext<R> {
         }
     }
 
+    #[instrument(skip_all, target = "group_context", level = "debug", fields(frame_id = %frame.id()))]
     pub fn process_frame(&mut self, frame: Frame) -> Result<(Vec<u8>, String, bool)> {
-        let frame_id = Sha3_256::digest(frame.encode_to_vec()?);
-
         let mut validator = self.validator.lock().unwrap();
 
-        let span = span!(
-            Level::DEBUG,
-            "process_frame",
-            current_epoch = ?validator.epoch(),
-            epoch = frame.frame_tbs().epoch(),
-            group_id = ?self.group_info.id(),
-            // frame_id = ?frame_id
-        );
-        let _enter = span.enter();
+        debug!(validator_epoch = validator.epoch(), frame_epoch = frame.frame_tbs().epoch(), group_id = ?self.group_info.id(), "Start process frame");
 
-        let (operation, stage_key) = validator
-            .validate_and_derive_key(&frame)
-            .inspect_err(|err| error!("Failed to validate and derive key for a given frame: {}", err))?;
+        let (operation, stage_key) =
+            validator
+                .validate_and_derive_key(&frame)
+                .inspect_err(|err| {
+                    error!(
+                        "Failed to validate and derive key for a given frame: {}",
+                        err
+                    )
+                })?;
         trace!("Stage key: {:?}", stage_key);
 
-        self.is_last_sender = self.sended_frames.contains_key(&frame_id.into());
+        self.is_last_sender = self.sended_frames.contains_key(&frame.id());
         debug!("We is last sender: {:?}", self.is_last_sender);
 
         let protected_payload = ProtectedPayload::decode(&decrypt(
             &stage_key,
             frame.frame_tbs().protected_payload(),
             &frame.frame_tbs().associated_data::<Sha3_256>()?,
-        )?).inspect_err(|err| error!("Failed to decode protected_payload: {}", err))?;
+        )?)
+        .inspect_err(|err| error!("Failed to decode protected_payload: {}", err))?;
 
         let Some(operation) = operation else {
             let sender_public_key = match protected_payload.protected_payload_tbs().sender() {
@@ -516,7 +515,7 @@ impl<R> GroupContext<R> {
         let leaf_secret = self.compute_leaf_secret_for_invitee(invitee, ephemeral_secret_key)?;
 
         // Predict add member changes
-        let mut proposal = validator.propose_add_member(leaf_secret)?;
+        let proposal = validator.propose_add_member(leaf_secret)?;
 
         // Frame construction
         let protected_payload_tbs = ProtectedPayloadTbs::new(
@@ -578,8 +577,7 @@ impl<R> GroupContext<R> {
 
         let invite = invite_tbs.sign::<Sha3_256>(self.identity_secret_key)?;
 
-        self.sended_frames
-            .insert(Sha3_256::digest(frame.encode_to_vec()?).into(), ());
+        self.sended_frames.insert(frame.id(), ());
 
         Ok((frame, invite))
     }
@@ -646,8 +644,7 @@ impl<R> GroupContext<R> {
         );
         let frame = Frame::new(frame_tbs, proof);
 
-        self.sended_frames
-            .insert(Sha3_256::digest(frame.encode_to_vec()?).into(), ());
+        self.sended_frames.insert(frame.id(), ());
 
         Ok(frame)
     }
@@ -690,7 +687,7 @@ impl<R> GroupContext<R> {
 
             frame_tbs.prove_schnorr::<Sha3_256>(validator.tree_key())?
         } else {
-            let mut proposal = validator.propose_update_key()?;
+            let proposal = validator.propose_update_key()?;
 
             let mut frame_tbs = FrameTbs::new(
                 self.group_info.id(),
@@ -713,8 +710,7 @@ impl<R> GroupContext<R> {
             Frame::new(frame_tbs, proof)
         };
 
-        self.sended_frames
-            .insert(Sha3_256::digest(frame.encode_to_vec()?).into(), ());
+        self.sended_frames.insert(frame.id(), ());
 
         Ok(frame)
     }
@@ -736,7 +732,7 @@ impl<R> GroupContext<R> {
 
         let protected_payload = protected_payload_tbs.sign::<Sha3_256>(self.identity_secret_key)?;
 
-        let mut proposal = validator.propose_leave_group()?;
+        let proposal = validator.propose_leave_group()?;
 
         let mut frame_tbs = FrameTbs::new(
             self.group_info.id(),
@@ -758,8 +754,7 @@ impl<R> GroupContext<R> {
         );
         let frame = Frame::new(frame_tbs, proof);
 
-        self.sended_frames
-            .insert(Sha3_256::digest(frame.encode_to_vec()?).into(), ());
+        self.sended_frames.insert(frame.id(), ());
 
         Ok(frame)
     }
@@ -817,7 +812,7 @@ impl<R> GroupContext<R> {
 
             frame_tbs.prove_schnorr::<Sha3_256>(validator.tree_key())?
         } else {
-            let mut proposal = validator.propose_update_key()?;
+            let proposal = validator.propose_update_key()?;
 
             let mut frame_tbs = FrameTbs::new(
                 self.group_info.id(),
@@ -840,8 +835,7 @@ impl<R> GroupContext<R> {
             Frame::new(frame_tbs, proof)
         };
 
-        self.sended_frames
-            .insert(Sha3_256::digest(frame.encode_to_vec()?).into(), ());
+        self.sended_frames.insert(frame.id(), ());
 
         Ok(frame)
     }
@@ -894,7 +888,7 @@ impl<R> GroupContext<R> {
 
             frame_tbs.prove_schnorr::<Sha3_256>(validator.tree_key())?
         } else {
-            let mut proposal = validator.propose_update_key()?;
+            let proposal = validator.propose_update_key()?;
 
             let mut frame_tbs = FrameTbs::new(
                 self.group_info.id(),
@@ -917,8 +911,7 @@ impl<R> GroupContext<R> {
             Frame::new(frame_tbs, proof)
         };
 
-        self.sended_frames
-            .insert(Sha3_256::digest(frame.encode_to_vec()?).into(), ());
+        self.sended_frames.insert(frame.id(), ());
 
         Ok(frame)
     }
@@ -945,7 +938,7 @@ impl<R> GroupContext<R> {
 
         let protected_payload = protected_payload_tbs.sign::<Sha3_256>(validator.leaf_key())?;
 
-        let mut proposal = validator.propose_update_key()?;
+        let proposal = validator.propose_update_key()?;
 
         let mut frame_tbs = FrameTbs::new(
             self.group_info.id(),
@@ -968,8 +961,7 @@ impl<R> GroupContext<R> {
 
         let frame = Frame::new(frame_tbs, proof);
 
-        self.sended_frames
-            .insert(Sha3_256::digest(frame.encode_to_vec()?).into(), ());
+        self.sended_frames.insert(frame.id(), ());
 
         Ok(frame)
     }

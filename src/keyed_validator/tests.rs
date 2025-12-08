@@ -142,9 +142,11 @@ fn test_sequential_invite_members_with_observer() {
         .expect("Failed to validate add observer frame");
 
     let mut observer_art = owner_keyed_validator.art.public_art().clone();
-    observer_art.commit().expect("Failed to commit observer public art");
-    let observer_art = PrivateArt::new(observer_art, observer_leaf_secret)
-        .expect("Failed to create private art");
+    observer_art
+        .commit()
+        .expect("Failed to commit observer public art");
+    let observer_art =
+        PrivateArt::new(observer_art, observer_leaf_secret).expect("Failed to create private art");
     let mut observer_keyed_validator = KeyedValidator::new(
         observer_art,
         stage_key,
@@ -179,8 +181,6 @@ fn test_sequential_invite_members_with_observer() {
         observer_keyed_validator
             .validate_and_derive_key(&frame)
             .expect("Failed to validate frame (observer)");
-
-
 
         assert_eq!(owner_keyed_validator.epoch, observer_keyed_validator.epoch);
         assert_eq!(owner_keyed_validator.art, observer_keyed_validator.art);

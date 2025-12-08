@@ -1,10 +1,10 @@
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
 use ark_ec::{AffineRepr, CurveGroup};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use prost::Message;
-use sha3::Digest;
-use zrt_art::art::{PublicArt};
+use sha3::{Digest, Sha3_256};
+use zrt_art::art::PublicArt;
 use zrt_art::changes::branch_change::{BranchChange, BranchChangeType};
 use zrt_crypto::schnorr;
 
@@ -17,6 +17,15 @@ use crate::{
     zero_art_proto,
 };
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, PartialOrd, Ord, Eq, Hash)]
+pub struct FrameId([u8; 32]);
+
+impl Display for FrameId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(&self.0))
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Frame {
     frame_tbs: FrameTbs,
@@ -26,6 +35,11 @@ pub struct Frame {
 impl Frame {
     pub fn new(frame_tbs: FrameTbs, proof: Proof) -> Self {
         Self { frame_tbs, proof }
+    }
+
+    pub fn id(&self) -> FrameId {
+        let id = Sha3_256::digest(self.encode_to_vec().unwrap());
+        FrameId(id.into())
     }
 
     // Getters

@@ -167,7 +167,11 @@ fn test_join_group() {
 
     let mut member_group_context = invite_context
         // .upgrade(group_context.tree())
-        .upgrade(group_context.commited_tree().expect("Public tree must be commitable"))
+        .upgrade(
+            group_context
+                .commited_tree()
+                .expect("Public tree must be commitable"),
+        )
         .expect("Failed to upgrade group context");
 
     assert_eq!(
@@ -263,7 +267,11 @@ fn test_invite_many_members_and_sync() {
             .expect("Failed to process add member proposal");
 
         frames.push(frame);
-        trees.push(group_context.commited_tree().expect("Public tree must be commitable"));
+        trees.push(
+            group_context
+                .commited_tree()
+                .expect("Public tree must be commitable"),
+        );
         invites.push(invite);
     }
 
@@ -399,7 +407,11 @@ fn test_remove_member() {
             .expect("Failed to process add member proposal");
 
         frames.push(frame);
-        trees.push(group_context.commited_tree().expect("Failed to commit tree"));
+        trees.push(
+            group_context
+                .commited_tree()
+                .expect("Failed to commit tree"),
+        );
         invites.push(invite);
     }
 
@@ -453,10 +465,7 @@ fn test_remove_member() {
         .expect("Failed to process frame");
     let process_result = contexts[1].process_frame(frame.clone());
     assert!(
-        matches!(
-            process_result,
-            Err(Error::UserRemovedFromGroup),
-        ),
+        matches!(process_result, Err(Error::UserRemovedFromGroup),),
         "Got {process_result:?}, while expected Err(Error::UserRemovedFromGroup)"
     );
     contexts[2]
@@ -631,7 +640,11 @@ fn test_leave_member() {
             .expect("Failed to process add member proposal");
 
         frames.push(frame);
-        trees.push(group_context.commited_tree().expect("Failed to commit tree"));
+        trees.push(
+            group_context
+                .commited_tree()
+                .expect("Failed to commit tree"),
+        );
         invites.push(invite);
     }
 

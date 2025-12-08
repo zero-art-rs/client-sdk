@@ -24,7 +24,9 @@ pub enum Error {
     #[error("Required field absent")]
     RequiredFieldAbsent,
     #[error("AES encryption error")]
-    AesError,
+    AesEncryptionError,
+    #[error("AES decryption error")]
+    AesDecryptionError,
     #[error("Unknown enum value")]
     UnknownEnumError(#[from] UnknownEnumValue),
     #[error("ART logic error")]

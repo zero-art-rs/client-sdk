@@ -35,7 +35,7 @@ pub fn encrypt(stage_key: &StageKey, plaintext: &[u8], aad: &[u8]) -> Result<Vec
                 aad,
             },
         )
-        .map_err(|_| Error::AesError)
+        .map_err(|_| Error::AesEncryptionError)
 }
 
 pub fn decrypt(stage_key: &StageKey, ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
@@ -59,7 +59,7 @@ pub fn decrypt(stage_key: &StageKey, ciphertext: &[u8], aad: &[u8]) -> Result<Ve
                 aad,
             },
         )
-        .map_err(|_| Error::AesError)
+        .map_err(|_| Error::AesDecryptionError)
 }
 
 pub fn compute_leaf_secret_a(

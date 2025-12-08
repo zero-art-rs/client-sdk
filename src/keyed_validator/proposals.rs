@@ -59,8 +59,8 @@ impl<R> KeyedValidator<R> {
         let eligibility_artefact = match leaf.status() {
             None => {
                 error!("Node with LeafStatus = None, is internal, and impossible to remove.");
-                return Err(Error::Forbidden)
-            },
+                return Err(Error::Forbidden);
+            }
             Some(LeafStatus::Active) => {
                 if is_owner {
                     let leaf_sk = self.art.secrets().preview().leaf();
