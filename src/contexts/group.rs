@@ -685,7 +685,7 @@ impl<R> GroupContext<R> {
             )?;
             frame_tbs.set_protected_payload(encrypted_protected_payload);
 
-            frame_tbs.prove_schnorr::<Sha3_256>(validator.tree_key())?
+            frame_tbs.prove_schnorr::<Sha3_256>(validator.tree_key_preview())?
         } else {
             let proposal = validator.propose_update_key()?;
 
