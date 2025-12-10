@@ -11,7 +11,7 @@ pub enum Error {
     ArtError(#[from] ArtError),
     #[error("Serialization error")]
     SerializationError(#[from] SerializationError),
-    #[error("Cryptography error")]
+    #[error("Cryptography error {0}")]
     CryptoError(#[from] zrt_crypto::CryptoError),
     #[error("Decode error")]
     DecodeError(#[from] DecodeError),
