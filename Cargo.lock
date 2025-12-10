@@ -440,8 +440,8 @@ dependencies = [
 
 [[package]]
 name = "bulletproofs"
-version = "5.0.0"
-source = "git+https://github.com/zero-art-rs/bulletproofs#1e95af1139deea191de7f79ed139b3092eb9e541"
+version = "5.0.1"
+source = "git+https://github.com/zero-art-rs/bulletproofs#d27dde04bb9a0a9fe2618a95ab452fcab8f7d944"
 dependencies = [
  "byteorder",
  "clear_on_drop",
@@ -504,9 +504,9 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
 name = "cc"
-version = "1.2.48"
+version = "1.2.49"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c481bdbf0ed3b892f6f806287d72acd515b352a4ec27a208489b8c1bc839633a"
+checksum = "90583009037521a116abf44494efecd645ba48b6622457080f080b85544e2215"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -627,7 +627,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 [[package]]
 name = "cortado"
 version = "0.1.0"
-source = "git+https://github.com/zero-art-rs/core.git?branch=feature%2Fzrt-art-refactor#31683a3598fa309246e10da79472adfeb7abfb7f"
+source = "git+https://github.com/zero-art-rs/core.git?branch=feature%2Fzrt-art-refactor#0a76fa52963a605cfe2c26ddc1d8f16629c81b3c"
 dependencies = [
  "ark-algebra-test-templates",
  "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
@@ -2228,7 +2228,7 @@ dependencies = [
  "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
  "ark-std",
  "ark-test-curves",
- "bulletproofs 5.0.1",
+ "bulletproofs 5.0.1 (git+https://github.com/zkcrypto/bulletproofs)",
  "curve25519-dalek",
  "group",
  "merlin",
@@ -2244,14 +2244,14 @@ dependencies = [
 [[package]]
 name = "zrt-art"
 version = "0.3.0"
-source = "git+https://github.com/zero-art-rs/core.git?branch=feature%2Fzrt-art-refactor#31683a3598fa309246e10da79472adfeb7abfb7f"
+source = "git+https://github.com/zero-art-rs/core.git?branch=feature%2Fzrt-art-refactor#0a76fa52963a605cfe2c26ddc1d8f16629c81b3c"
 dependencies = [
  "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
  "ark-ed25519",
  "ark-ff 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
  "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
  "ark-std",
- "bulletproofs 5.0.0",
+ "bulletproofs 5.0.1 (git+https://github.com/zero-art-rs/bulletproofs)",
  "chrono",
  "cortado",
  "criterion",
@@ -2282,7 +2282,7 @@ dependencies = [
  "ark-std",
  "bimap",
  "blake3",
- "bulletproofs 5.0.0",
+ "bulletproofs 5.0.1 (git+https://github.com/zero-art-rs/bulletproofs)",
  "chrono",
  "cortado",
  "curve25519-dalek",
@@ -2312,7 +2312,7 @@ dependencies = [
 [[package]]
 name = "zrt-crypto"
 version = "0.1.0"
-source = "git+https://github.com/zero-art-rs/core.git?branch=feature%2Fzrt-art-refactor#31683a3598fa309246e10da79472adfeb7abfb7f"
+source = "git+https://github.com/zero-art-rs/core.git?branch=feature%2Fzrt-art-refactor#0a76fa52963a605cfe2c26ddc1d8f16629c81b3c"
 dependencies = [
  "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
  "cortado",
@@ -2327,14 +2327,14 @@ dependencies = [
 [[package]]
 name = "zrt-zk"
 version = "0.3.0"
-source = "git+https://github.com/zero-art-rs/core.git?branch=feature%2Fzrt-art-refactor#31683a3598fa309246e10da79472adfeb7abfb7f"
+source = "git+https://github.com/zero-art-rs/core.git?branch=feature%2Fzrt-art-refactor#0a76fa52963a605cfe2c26ddc1d8f16629c81b3c"
 dependencies = [
  "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
  "ark-ed25519",
  "ark-ff 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
  "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
  "ark-std",
- "bulletproofs 5.0.0",
+ "bulletproofs 5.0.1 (git+https://github.com/zero-art-rs/bulletproofs)",
  "chrono",
  "cortado",
  "curve25519-dalek",
