@@ -1007,20 +1007,25 @@ impl<R> GroupContext<R> {
         (CortadoAffine::generator() * self.identity_secret_key).into_affine()
     }
 
-    pub fn sign_with_tk(&self, msg: &[u8]) -> Result<Vec<u8>> {
+    pub fn sign_with_tk(&self, msg: &[u8], use_preview_key: bool) -> Result<Vec<u8>> {
         let validator = self.validator.lock().unwrap();
 
+        let (tree_key, tree_public_key) = if use_preview_key {
+            let tree_key = validator.tree_key_preview();
+            let tree_public_key = validator.tree_public_key_preview();
+
+            (tree_key, tree_public_key)
+        } else {
+            (validator.tree_key(), validator.tree_public_key())
+        };
+
         debug!(
-            tree_key = ?validator.tree_key_preview(),
-            tree_public_key = ?validator.tree_public_key_preview(),
+            tree_public_key = ?tree_public_key,
+            use_preview_key = ?use_preview_key,
             "sign_with_tk"
         );
 
-        Ok(schnorr::sign(
-            &vec![validator.tree_key_preview()],
-            &vec![validator.tree_public_key_preview()],
-            msg,
-        )?)
+        Ok(schnorr::sign(&vec![tree_key], &vec![tree_public_key], msg)?)
     }
 
     pub fn tree(&self) -> PublicArt<CortadoAffine> {
