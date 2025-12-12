@@ -381,9 +381,6 @@ impl<R> KeyedValidator<R> {
             .for_branch(&verification_branch)
             .with_associated_data(&frame.frame_tbs().digest::<Sha3_256>()?)
             .verify(proof)
-            .inspect_err(|err| {
-                error!("Fail to verify proof: {err}");
-            })
             .map_err(|_| Error::InvalidInput)?;
 
         if is_next_epoch {
