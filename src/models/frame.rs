@@ -4,6 +4,7 @@ use ark_ec::{AffineRepr, CurveGroup};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use prost::Message;
 use sha3::{Digest, Sha3_256};
+use tracing::debug;
 use zrt_art::art::PublicArt;
 use zrt_art::changes::branch_change::{BranchChange, BranchChangeType};
 use zrt_crypto::schnorr;
@@ -223,11 +224,19 @@ impl FrameTbs {
 
     pub fn prove_schnorr<D: Digest>(self, secret_key: ScalarField) -> Result<Frame> {
         let public_key = (CortadoAffine::generator() * secret_key).into_affine();
+        let msg = D::digest(self.encode_to_vec()?);
         let signature = schnorr::sign(
             &vec![secret_key],
             &vec![public_key],
-            &D::digest(self.encode_to_vec()?),
+            &msg,
         )?;
+
+        debug!(
+            public_key = ?public_key,
+            msg = ?msg,
+            "prove_schnorr"
+        );
+
         Ok(Frame {
             frame_tbs: self,
             proof: Proof::SchnorrSignature(signature),

@@ -92,6 +92,11 @@ impl<R> KeyedValidator<R> {
     where
         R: CryptoRngCore,
     {
+        debug!(
+            eligibility_artefact = ?proposal.eligibility_artefact,
+            "prove_schnorr"
+        );
+
         let art_proof = self
             .prover_engine
             .new_context(proposal.eligibility_artefact.clone())
