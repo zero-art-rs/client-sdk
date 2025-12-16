@@ -385,8 +385,7 @@ impl<R> KeyedValidator<R> {
             .new_context(eligibility_requirement)
             .for_branch(&verification_branch)
             .with_associated_data(&frame.frame_tbs().digest::<Sha3_256>()?)
-            .verify(proof)
-            .map_err(|_| Error::InvalidInput)?;
+            .verify(proof)?;
 
         if is_next_epoch {
             self.art.commit()?;
