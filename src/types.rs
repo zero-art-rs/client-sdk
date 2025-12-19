@@ -1,12 +1,20 @@
 use ark_ec::AffineRepr;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use blake3;
 use cortado::CortadoAffine;
-use zrt_art::types::{BranchChanges, ProverArtefacts};
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use zrt_art::changes::branch_change::{BranchChange, PrivateBranchChange};
+use zrt_zk::EligibilityArtefact;
+use zrt_zk::art::ProverNodeData;
 
 #[derive(Debug)]
 pub enum GroupOperation<G: AffineRepr + CanonicalSerialize + CanonicalDeserialize> {
     Init,
-    LeaveGroup,
+    LeaveGroup {
+        old_public_key: G,
+        new_public_key: G,
+    },
     DropGroup,
     AddMember {
         member_public_key: G,
@@ -16,23 +24,95 @@ pub enum GroupOperation<G: AffineRepr + CanonicalSerialize + CanonicalDeserializ
         new_public_key: G,
     },
     RemoveMember {
-        member_public_key: G,
+        old_public_key: G,
+        new_public_key: G,
     },
 }
 
-#[derive(Debug)]
 pub struct Proposal<G: AffineRepr + CanonicalSerialize + CanonicalDeserialize> {
-    pub changes: BranchChanges<G>,
+    pub change: BranchChange<G>,
     pub stage_key: StageKey,
-    pub prover_artefacts: ProverArtefacts<G>,
-    pub aux_secret_key: G::ScalarField,
+    pub prover_branch: Vec<ProverNodeData<CortadoAffine>>,
+    pub eligibility_artefact: EligibilityArtefact,
 }
 
 pub type AddMemberProposal = Proposal<CortadoAffine>;
 pub type RemoveMemberProposal = Proposal<CortadoAffine>;
 pub type UpdateKeyProposal = Proposal<CortadoAffine>;
+pub type LeaveGroupProposal = Proposal<CortadoAffine>;
 pub type ValidationResult = Option<GroupOperation<CortadoAffine>>;
 pub type ValidationWithKeyResult = (ValidationResult, StageKey);
 
 pub type StageKey = [u8; 32];
-pub type ChangesID = [u8; 8];
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ChangeID([u8; 8]);
+
+impl ChangeID {
+    /// Creates a new ChangeID from any byte slice or array.
+    /// If the input is shorter than 8 bytes, it will be padded with zeros.
+    /// If the input is longer than 8 bytes, it will be truncated.
+    pub fn new(bytes: impl AsRef<[u8]>) -> Self {
+        let bytes = bytes.as_ref();
+        let mut id = [0u8; 8];
+        let len = bytes.len().min(8);
+        id[..len].copy_from_slice(&bytes[..len]);
+        Self(id)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 8] {
+        &self.0
+    }
+
+    pub fn into_bytes(self) -> [u8; 8] {
+        self.0
+    }
+}
+
+impl From<[u8; 8]> for ChangeID {
+    fn from(bytes: [u8; 8]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl From<ChangeID> for [u8; 8] {
+    fn from(id: ChangeID) -> Self {
+        id.0
+    }
+}
+
+impl AsRef<[u8]> for ChangeID {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl fmt::Display for ChangeID {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", hex::encode(self.0))
+    }
+}
+
+pub trait Identifiable {
+    type Id;
+
+    fn id(&self) -> Self::Id;
+}
+
+impl<G: AffineRepr + CanonicalSerialize> Identifiable for BranchChange<G> {
+    type Id = ChangeID;
+
+    fn id(&self) -> Self::Id {
+        let serialized = postcard::to_allocvec(self).unwrap_or_default();
+        let hash = blake3::hash(&serialized);
+        ChangeID::new(&hash.as_bytes()[..8])
+    }
+}
+
+impl<G: AffineRepr + CanonicalSerialize> Identifiable for PrivateBranchChange<G> {
+    type Id = ChangeID;
+
+    fn id(&self) -> Self::Id {
+        self.change().id()
+    }
+}

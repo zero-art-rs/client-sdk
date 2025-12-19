@@ -8,7 +8,6 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub enum Payload {
-    Action(GroupActionPayload),
     Crdt(zero_art_proto::crdt_payload::Payload),
     Chat(zero_art_proto::chat_payload::Payload),
 }
@@ -23,18 +22,11 @@ impl Payload {
     }
 }
 
-impl Default for Payload {
-    fn default() -> Self {
-        Payload::Action(GroupActionPayload::default())
-    }
-}
-
 impl TryFrom<zero_art_proto::Payload> for Payload {
     type Error = Error;
 
     fn try_from(value: zero_art_proto::Payload) -> Result<Self> {
         let payload = match value.content.ok_or(Error::RequiredFieldAbsent)? {
-            zero_art_proto::payload::Content::Action(action) => Payload::Action(action.try_into()?),
             zero_art_proto::payload::Content::Crdt(crtd) => {
                 Payload::Crdt(crtd.payload.ok_or(Error::RequiredFieldAbsent)?)
             }
@@ -50,7 +42,6 @@ impl TryFrom<zero_art_proto::Payload> for Payload {
 impl From<Payload> for zero_art_proto::Payload {
     fn from(value: Payload) -> Self {
         let content = match value {
-            Payload::Action(action) => zero_art_proto::payload::Content::Action(action.into()),
             Payload::Crdt(crdt) => {
                 zero_art_proto::payload::Content::Crdt(zero_art_proto::CrdtPayload {
                     payload: Some(crdt),
@@ -65,6 +56,25 @@ impl From<Payload> for zero_art_proto::Payload {
 
         zero_art_proto::Payload {
             content: Some(content),
+        }
+    }
+}
+
+impl TryFrom<zero_art_proto::Payloads> for Vec<Payload> {
+    type Error = Error;
+
+    fn try_from(value: zero_art_proto::Payloads) -> std::result::Result<Self, Self::Error> {
+        value.payloads.into_iter().map(Payload::try_from).collect()
+    }
+}
+
+impl From<Vec<Payload>> for zero_art_proto::Payloads {
+    fn from(value: Vec<Payload>) -> Self {
+        Self {
+            payloads: value
+                .into_iter()
+                .map(zero_art_proto::Payload::from)
+                .collect(),
         }
     }
 }

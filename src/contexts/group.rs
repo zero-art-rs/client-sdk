@@ -1,33 +1,35 @@
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::UniformRand;
-use ark_std::rand::thread_rng;
+use ark_std::rand::{SeedableRng, rngs::StdRng, thread_rng};
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
+use rand_core::CryptoRngCore;
+use std::fmt::Debug;
+use std::ops::Deref;
 use std::sync::Mutex;
-use tracing::trace;
+use tracing::{Level, debug, error, info, instrument, span, trace};
+use zrt_art::art::PublicArt;
 use zrt_crypto::schnorr;
 
-use serde::{Deserialize, Serialize};
-use sha3::{Digest, Sha3_256};
-use zrt_art::types::PrivateART;
-
+use crate::models::frame::FrameId;
 use crate::{
-    core::{
-        impls::concurrent::linear_keyed_validator::LinearKeyedValidator,
-        traits::{KeyedValidator, Validator},
-    },
+    bounded_map::BoundedMap,
     errors::{Error, Result},
+    keyed_validator::KeyedValidator,
     models::{
+        self,
         frame::{Frame, FrameTbs, GroupOperation, Proof},
-        group_info::{GroupInfo, Role, User, public_key_to_id},
+        group_info::{GroupInfo, Role, Status, User, public_key_to_id},
         invite::{Invite, InviteTbs, Invitee, ProtectedInviteData},
-        payload::{GroupActionPayload, Payload},
+        payload::GroupActionPayload,
         protected_payload::{ProtectedPayload, ProtectedPayloadTbs, Sender},
     },
-    proof_system::get_proof_system,
     types,
     utils::{decrypt, derive_invite_key, derive_stage_key, encrypt, serialize},
 };
+use serde::{Deserialize, Serialize};
+use sha3::{Digest, Sha3_256};
+use zrt_art::art::PrivateArt;
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct Nonce(u64);
@@ -49,53 +51,90 @@ impl Nonce {
 }
 
 #[derive(Debug)]
-pub struct GroupContext {
+pub struct GroupContext<R> {
     identity_secret_key: ScalarField,
-    validator: Mutex<LinearKeyedValidator>,
+    validator: Mutex<KeyedValidator<R>>,
     group_info: GroupInfo,
     seq_num: u64,
     nonce: Nonce,
+    is_last_sender: bool,
+    sended_frames: BoundedMap<FrameId, ()>,
+
+    accept_unverified: bool,
 }
 
-impl GroupContext {
+impl GroupContext<StdRng> {
+    #[instrument(skip_all)]
     pub fn new(
         identity_secret_key: ScalarField,
         mut user: User,
         mut group_info: GroupInfo,
     ) -> Result<(Self, Frame)> {
+        info!("Creating new group");
+
+        debug!("Generating leaf secret");
         let leaf_secret = ScalarField::rand(&mut thread_rng());
-        let (base_art, tree_key) =
-            PrivateART::new_art_from_secrets(&vec![leaf_secret], &CortadoAffine::generator())?;
-        let base_stk = derive_stage_key(&[0u8; 32], tree_key.key)?;
+        let leaf_key = (CortadoAffine::generator() * leaf_secret).into_affine();
+        trace!(leaf_secret = ?leaf_secret, leaf_key = ?leaf_key, "Generate ART key pair");
+        debug!("Making ART");
+        let base_art = PrivateArt::setup(&[leaf_secret])?;
+        let base_stk = derive_stage_key(&[0u8; 32], base_art.root_secret_key())?;
+        // trace!(art = ?base_art, stage_key = ?base_stk, "Intitialize ART and stage key");
 
-        *user.role_mut() = Role::Ownership;
+        user.role = Role::Ownership;
+        user.status = Status::Active;
+        *user.leaf_key_mut() = leaf_key;
 
-        group_info
-            .members_mut()
-            .insert((CortadoAffine::generator() * leaf_secret).into(), user);
+        group_info.members_mut().insert(leaf_key, user);
 
-        let frame = FrameTbs::new(
+        debug!("Constructing initial frame");
+        let mut frame_tbs = FrameTbs::new(
             group_info.id(),
             0,
             serialize((CortadoAffine::generator() * identity_secret_key).into_affine())?,
-            Some(GroupOperation::Init(base_art.clone().into())),
+            Some(GroupOperation::Init(base_art.public_art().clone())),
             vec![],
-        )
-        .prove_schnorr::<Sha3_256>(identity_secret_key)?;
+        );
+        let protected_payload = encrypt(
+            &base_stk,
+            &ProtectedPayload::default().encode_to_vec(),
+            &frame_tbs.associated_data::<Sha3_256>()?,
+        )?;
+        frame_tbs.set_protected_payload(protected_payload);
 
+        let frame = frame_tbs.prove_schnorr::<Sha3_256>(identity_secret_key)?;
+
+        info!("New group created");
         Ok((
             Self {
                 identity_secret_key,
-                validator: Mutex::new(LinearKeyedValidator::new(base_art, base_stk, 0)),
+                validator: Mutex::new(KeyedValidator::new(
+                    base_art,
+                    base_stk,
+                    0,
+                    StdRng::from_rng(thread_rng()).unwrap(),
+                )),
                 group_info,
                 seq_num: 0,
                 nonce: Nonce(0),
+                is_last_sender: false,
+                sended_frames: BoundedMap::with_capacity(8),
+                accept_unverified: true,
             },
             frame,
         ))
     }
+}
 
-    pub fn into_parts(self) -> (ScalarField, LinearKeyedValidator, GroupInfo, u64, Nonce) {
+impl<R> GroupContext<R> {
+    pub fn into_parts(self) -> (ScalarField, KeyedValidator<R>, GroupInfo, u64, Nonce) {
+        debug!(
+            identity_secret_key = ?self.identity_secret_key,
+            group_info = ?self.group_info,
+            seq_num = ?self.seq_num,
+            nonce = ?self.nonce,
+            "into_parts data"
+        );
         (
             self.identity_secret_key,
             self.validator.into_inner().unwrap(),
@@ -105,10 +144,17 @@ impl GroupContext {
         )
     }
 
-    pub fn to_parts(&self) -> (ScalarField, LinearKeyedValidator, GroupInfo, u64, Nonce) {
+    pub fn to_parts(&self) -> (ScalarField, Vec<u8>, GroupInfo, u64, Nonce) {
+        debug!(
+            identity_secret_key = ?self.identity_secret_key,
+            group_info = ?self.group_info,
+            seq_num = ?self.seq_num,
+            nonce = ?self.nonce,
+            "to_parts data"
+        );
         (
             self.identity_secret_key,
-            self.validator.lock().unwrap().clone(),
+            self.validator.lock().unwrap().deref().serialize().unwrap(),
             self.group_info.clone(),
             self.seq_num,
             self.nonce,
@@ -117,7 +163,7 @@ impl GroupContext {
 
     pub fn from_parts(
         identity_secret_key: ScalarField,
-        validator: LinearKeyedValidator,
+        validator: KeyedValidator<R>,
         group_info: GroupInfo,
         seq_num: u64,
         nonce: Nonce,
@@ -128,36 +174,104 @@ impl GroupContext {
             group_info,
             seq_num,
             nonce,
+            is_last_sender: false,
+            sended_frames: BoundedMap::with_capacity(8),
+            accept_unverified: true,
         }
     }
 
-    pub fn process_frame(&mut self, frame: Frame) -> Result<Vec<Payload>> {
+    #[instrument(skip_all, target = "group_context", level = "debug", fields(frame_id = %frame.id()))]
+    pub fn process_frame(&mut self, frame: Frame) -> Result<(Vec<u8>, String, bool)> {
         let mut validator = self.validator.lock().unwrap();
-        let (operation, stage_key) = validator.validate_and_derive_key(&frame)?;
+
+        debug!(validator_epoch = validator.epoch(), frame_epoch = frame.frame_tbs().epoch(), group_id = ?self.group_info.id(), "Start process frame");
+
+        let (operation, stage_key) =
+            validator
+                .validate_and_derive_key(&frame)
+                .inspect_err(|err| {
+                    error!(
+                        "Failed to validate and derive key for a given frame: {}",
+                        err
+                    )
+                })?;
+        trace!("Stage key: {:?}", stage_key);
+
+        self.is_last_sender = self.sended_frames.contains_key(&frame.id());
+        debug!("We is last sender: {:?}", self.is_last_sender);
 
         let protected_payload = ProtectedPayload::decode(&decrypt(
             &stage_key,
             frame.frame_tbs().protected_payload(),
             &frame.frame_tbs().associated_data::<Sha3_256>()?,
-        )?)?;
+        )?)
+        .inspect_err(|err| error!("Failed to decode protected_payload: {}", err))?;
 
         let Some(operation) = operation else {
-            return Ok(protected_payload
-                .protected_payload_tbs()
-                .payloads()
-                .to_vec());
+            let sender_public_key = match protected_payload.protected_payload_tbs().sender() {
+                Sender::UserId(user_id) => self
+                    .group_info
+                    .members()
+                    .get(user_id)
+                    .ok_or(Error::SenderNotInGroup)?
+                    .public_key(),
+
+                Sender::LeafId(_) => unimplemented!(),
+            };
+
+            let verified = match protected_payload.verify::<Sha3_256>(sender_public_key) {
+                Ok(_) => true,
+                Err(e) => {
+                    if !self.accept_unverified {
+                        return Err(e);
+                    }
+
+                    false
+                }
+            };
+
+            for action in protected_payload.protected_payload_tbs().group_actions() {
+                match action {
+                    models::payload::GroupActionPayload::ChangeUser(user) => {
+                        let Some(user_to_update) = self.group_info.members_mut().get_mut(user.id())
+                        else {
+                            break;
+                        };
+
+                        user_to_update.name = user.name.clone();
+                        user_to_update.picture = user.picture.clone();
+                    }
+                    models::payload::GroupActionPayload::ChangeGroup(group_info) => {
+                        debug!("Group name: {:?}", group_info.name);
+                        debug!("Group picture{:?}", group_info.picture);
+                        self.group_info.name = group_info.name.clone();
+                        self.group_info.picture = group_info.picture.clone();
+                    }
+                    _ => todo!(),
+                }
+            }
+
+            return Ok((
+                protected_payload.protected_payload_tbs().content().to_vec(),
+                protected_payload
+                    .protected_payload_tbs()
+                    .sender()
+                    .id()
+                    .to_string(),
+                verified,
+            ));
         };
 
+        let mut verified = false;
         match operation {
             types::GroupOperation::AddMember { member_public_key } => {
-                trace!("GroupMembers count: {}", self.group_info.members().len());
                 if self.group_info.members().is_empty() {
                     let group_info = protected_payload
                         .protected_payload_tbs()
-                        .payloads()
+                        .group_actions()
                         .iter()
                         .find_map(|payload| match payload {
-                            Payload::Action(GroupActionPayload::InviteMember(group_info)) => {
+                            GroupActionPayload::InviteMember(group_info) => {
                                 Some(group_info.to_owned())
                             }
                             _ => None,
@@ -177,14 +291,23 @@ impl GroupContext {
                         .public_key(),
                     Sender::LeafId(_) => unimplemented!(),
                 };
-                protected_payload.verify::<Sha3_256>(sender_public_key)?;
 
-                let member = User::new_with_id(
+                if let Err(e) = protected_payload.verify::<Sha3_256>(sender_public_key) {
+                    if !self.accept_unverified {
+                        return Err(e);
+                    }
+                } else {
+                    verified = true
+                }
+
+                let mut member = User::new_with_id(
                     public_key_to_id(member_public_key),
                     String::from("Invited"),
                     CortadoAffine::identity(),
                     serialize(member_public_key)?,
                 );
+                *member.leaf_key_mut() = member_public_key;
+
                 self.group_info
                     .members_mut()
                     .insert(member_public_key, member);
@@ -205,23 +328,32 @@ impl GroupContext {
                         old_public_key
                     }
                 };
-                protected_payload.verify::<Sha3_256>(sender_public_key)?;
+
+                if let Err(e) = protected_payload.verify::<Sha3_256>(sender_public_key) {
+                    if !self.accept_unverified {
+                        return Err(e);
+                    }
+                } else {
+                    verified = true
+                }
 
                 let leaf_id = public_key_to_id(old_public_key);
 
                 if self.group_info.members().get(&leaf_id).is_some() {
                     let user = protected_payload
                         .protected_payload_tbs()
-                        .payloads()
+                        .group_actions()
                         .iter()
                         .find_map(|payload| match payload {
-                            Payload::Action(GroupActionPayload::JoinGroup(user)) => {
-                                Some(user.to_owned())
-                            }
+                            GroupActionPayload::JoinGroup(user) => Some(user.to_owned()),
                             _ => None,
                         });
 
-                    if let Some(user) = user {
+                    if let Some(mut user) = user
+                        && matches!(user.status, Status::Invited)
+                    {
+                        user.status = Status::Active;
+
                         self.group_info
                             .members_mut()
                             .update_user(old_public_key, user);
@@ -232,7 +364,13 @@ impl GroupContext {
                     .members_mut()
                     .update_leaf(old_public_key, new_public_key);
             }
-            types::GroupOperation::RemoveMember { member_public_key } => {
+            types::GroupOperation::RemoveMember {
+                old_public_key,
+                new_public_key,
+            } => {
+                let span = span!(Level::TRACE, "remove_member_operation");
+                let _enter = span.enter();
+
                 let sender_public_key = match protected_payload.protected_payload_tbs().sender() {
                     Sender::UserId(user_id) => self
                         .group_info
@@ -242,27 +380,121 @@ impl GroupContext {
                         .public_key(),
                     Sender::LeafId(_) => unimplemented!(),
                 };
-                protected_payload.verify::<Sha3_256>(sender_public_key)?;
+
+                if let Err(e) = protected_payload.verify::<Sha3_256>(sender_public_key) {
+                    if !self.accept_unverified {
+                        return Err(e);
+                    }
+                } else {
+                    verified = true
+                }
+
+                debug!("Removed member leaf public key: {:?}", old_public_key);
+                if sender_public_key == self.identity_public_key() {
+                    self.group_info
+                        .members_mut()
+                        .remove_by_leaf(&old_public_key);
+                }
+
+                if let Some(user_id) = self.group_info.members().get_id(&old_public_key).cloned() {
+                    let user = self.group_info.members_mut().get_mut(&user_id).unwrap();
+                    debug!("UserAAA: {:?}", user);
+                    debug!("OldPK: {:?}", old_public_key);
+                    debug!("NewPK: {:?}", new_public_key);
+                    user.status = Status::PendingRemoval;
+                    self.group_info
+                        .members_mut()
+                        .update_leaf(old_public_key, new_public_key);
+                    let user = self.group_info.members_mut().get_mut(&user_id).unwrap();
+                    debug!("UserAAA: {:?}", user);
+                    debug!("OldPK: {:?}", old_public_key);
+                    debug!("NewPK: {:?}", new_public_key);
+                }
+            }
+            types::GroupOperation::LeaveGroup {
+                old_public_key,
+                new_public_key,
+            } => {
+                let span = span!(Level::TRACE, "leave_group_operation");
+                let _enter = span.enter();
+
+                let sender_public_key = match protected_payload.protected_payload_tbs().sender() {
+                    Sender::UserId(user_id) => self
+                        .group_info
+                        .members()
+                        .get(user_id)
+                        .ok_or(Error::SenderNotInGroup)?
+                        .public_key(),
+                    Sender::LeafId(_) => {
+                        // TODO: Map for leafs
+                        old_public_key
+                    }
+                };
+
+                if let Err(e) = protected_payload.verify::<Sha3_256>(sender_public_key) {
+                    if !self.accept_unverified {
+                        return Err(e);
+                    }
+                } else {
+                    verified = true
+                }
+
+                let user_id = self.group_info.members().get_id(&old_public_key).cloned();
+                debug!(user_id = ?user_id, public_key = ?old_public_key, "Get user id");
+
+                if let Some(user_id) = user_id {
+                    self.group_info
+                        .members_mut()
+                        .get_mut(&user_id)
+                        .unwrap()
+                        .status = Status::Left
+                }
 
                 self.group_info
                     .members_mut()
-                    .remove_by_leaf(&member_public_key);
+                    .update_leaf(old_public_key, new_public_key);
             }
             _ => {}
         }
 
-        Ok(protected_payload
-            .protected_payload_tbs()
-            .payloads()
-            .to_vec())
+        for action in protected_payload.protected_payload_tbs().group_actions() {
+            match action {
+                models::payload::GroupActionPayload::ChangeUser(user) => {
+                    let Some(user_to_update) = self.group_info.members_mut().get_mut(user.id())
+                    else {
+                        break;
+                    };
+
+                    user_to_update.name = user.name.clone();
+                    user_to_update.picture = user.picture.clone();
+                }
+                models::payload::GroupActionPayload::ChangeGroup(group_info) => {
+                    debug!("Group name: {:?}", group_info.name);
+                    debug!("Group picture{:?}", group_info.picture);
+                    self.group_info.name = group_info.name.clone();
+                    self.group_info.picture = group_info.picture.clone();
+                }
+                _ => {}
+            }
+        }
+
+        Ok((
+            protected_payload.protected_payload_tbs().content().to_vec(),
+            protected_payload
+                .protected_payload_tbs()
+                .sender()
+                .id()
+                .to_string(),
+            verified,
+        ))
     }
 
-    pub fn add_member(
-        &mut self,
-        invitee: Invitee,
-        mut payloads: Vec<Payload>,
-    ) -> Result<(Frame, Invite)> {
-        let validator = self.validator.lock().unwrap();
+    #[instrument(skip_all)]
+    pub fn add_member(&mut self, invitee: Invitee, content: Vec<u8>) -> Result<(Frame, Invite)>
+    where
+        R: CryptoRngCore,
+    {
+        let mut validator = self.validator.lock().unwrap();
         // Future epoch
         let epoch = validator.epoch() + 1;
 
@@ -276,16 +508,13 @@ impl GroupContext {
         // Predict add member changes
         let proposal = validator.propose_add_member(leaf_secret)?;
 
-        payloads.push(Payload::Action(GroupActionPayload::InviteMember(
-            self.group_info.clone(),
-        )));
-
         // Frame construction
         let protected_payload_tbs = ProtectedPayloadTbs::new(
             self.seq_num,
             Utc::now(),
-            payloads,
+            content,
             Sender::UserId(public_key_to_id(self.identity_public_key())),
+            vec![GroupActionPayload::InviteMember(self.group_info.clone())],
         );
 
         let protected_payload = protected_payload_tbs.sign::<Sha3_256>(self.identity_secret_key)?;
@@ -293,9 +522,13 @@ impl GroupContext {
             self.group_info.id(),
             epoch,
             self.nonce.advance(),
-            Some(GroupOperation::AddMember(proposal.changes)),
+            Some(GroupOperation::AddMember(proposal.change.clone().into())),
             vec![],
         );
+
+        protected_payload
+            .verify::<Sha3_256>(self.identity_public_key())
+            .unwrap();
 
         // Encryption
         let encrypted_protected_payload = encrypt(
@@ -306,11 +539,9 @@ impl GroupContext {
         frame_tbs.set_protected_payload(encrypted_protected_payload);
 
         // Proving
-        let proof = Proof::ArtProof(get_proof_system().prove(
-            proposal.prover_artefacts,
-            &[proposal.aux_secret_key],
-            &Sha3_256::digest(frame_tbs.encode_to_vec()?),
-        )?);
+        let proof = Proof::ArtProof(
+            validator.prove(&proposal, &Sha3_256::digest(frame_tbs.encode_to_vec()?))?,
+        );
         let frame = Frame::new(frame_tbs, proof);
 
         // Invite construction
@@ -332,11 +563,17 @@ impl GroupContext {
 
         let invite = invite_tbs.sign::<Sha3_256>(self.identity_secret_key)?;
 
+        self.sended_frames.insert(frame.id(), ());
+
         Ok((frame, invite))
     }
 
-    pub fn remove_member(&mut self, user_id: &str, mut payloads: Vec<Payload>) -> Result<Frame> {
-        let validator = self.validator.lock().unwrap();
+    #[instrument(skip_all)]
+    pub fn remove_member(&mut self, user_id: &str, content: Vec<u8>) -> Result<Frame>
+    where
+        R: CryptoRngCore,
+    {
+        let mut validator = self.validator.lock().unwrap();
 
         // Future epoch
         let epoch = validator.epoch() + 1;
@@ -350,23 +587,24 @@ impl GroupContext {
             .get_leaf(user_id)
             .ok_or(Error::SenderNotInGroup)?;
 
+        debug!("Leaf to delete: {:?}", leaf);
+        debug!("validator: {:?}", validator);
         // Predict add member changes
         let proposal = validator.propose_remove_member(*leaf, vanishing_leaf_secret)?;
-
-        payloads.push(Payload::Action(GroupActionPayload::RemoveMember(
-            self.group_info
-                .members()
-                .get(user_id)
-                .ok_or(Error::SenderNotInGroup)?
-                .to_owned(),
-        )));
 
         // Frame construction
         let protected_payload_tbs = ProtectedPayloadTbs::new(
             self.seq_num,
             Utc::now(),
-            payloads,
+            content,
             Sender::UserId(public_key_to_id(self.identity_public_key())),
+            vec![GroupActionPayload::RemoveMember(
+                self.group_info
+                    .members()
+                    .get(user_id)
+                    .ok_or(Error::SenderNotInGroup)?
+                    .to_owned(),
+            )],
         );
 
         let protected_payload = protected_payload_tbs.sign::<Sha3_256>(self.identity_secret_key)?;
@@ -374,7 +612,7 @@ impl GroupContext {
             self.group_info.id(),
             epoch,
             self.nonce.advance(),
-            Some(GroupOperation::RemoveMember(proposal.changes)),
+            Some(GroupOperation::RemoveMember(proposal.change.clone().into())),
             vec![],
         );
 
@@ -387,30 +625,35 @@ impl GroupContext {
         frame_tbs.set_protected_payload(encrypted_protected_payload);
 
         // Proving
-        let proof = Proof::ArtProof(get_proof_system().prove(
-            proposal.prover_artefacts,
-            &[proposal.aux_secret_key],
-            &Sha3_256::digest(frame_tbs.encode_to_vec()?),
-        )?);
+        let proof = Proof::ArtProof(
+            validator.prove(&proposal, &Sha3_256::digest(frame_tbs.encode_to_vec()?))?,
+        );
         let frame = Frame::new(frame_tbs, proof);
+
+        self.sended_frames.insert(frame.id(), ());
 
         Ok(frame)
     }
 
-    pub fn create_frame(&mut self, payloads: Vec<Payload>) -> Result<Frame> {
+    #[instrument(skip_all)]
+    pub fn create_frame(&mut self, content: Vec<u8>) -> Result<Frame>
+    where
+        R: CryptoRngCore,
+    {
         let mut validator = self.validator.lock().unwrap();
 
         let protected_payload_tbs = ProtectedPayloadTbs::new(
             self.seq_num,
             Utc::now(),
-            payloads,
+            content,
             Sender::UserId(public_key_to_id(self.identity_public_key())),
+            vec![],
         );
 
         let protected_payload = protected_payload_tbs.sign::<Sha3_256>(self.identity_secret_key)?;
 
         // Predict add member changes
-        let frame = if validator.is_participant() {
+        let frame = if self.is_last_sender {
             let mut frame_tbs = FrameTbs::new(
                 self.group_info.id(),
                 validator.epoch(),
@@ -428,7 +671,7 @@ impl GroupContext {
             )?;
             frame_tbs.set_protected_payload(encrypted_protected_payload);
 
-            frame_tbs.prove_schnorr::<Sha3_256>(validator.tree_key())?
+            frame_tbs.prove_schnorr::<Sha3_256>(validator.tree_key_preview())?
         } else {
             let proposal = validator.propose_update_key()?;
 
@@ -436,7 +679,7 @@ impl GroupContext {
                 self.group_info.id(),
                 validator.epoch() + 1,
                 self.nonce.advance(),
-                Some(GroupOperation::KeyUpdate(proposal.changes)),
+                Some(GroupOperation::KeyUpdate(proposal.change.clone().into())),
                 vec![],
             );
 
@@ -447,39 +690,41 @@ impl GroupContext {
             )?;
             frame_tbs.set_protected_payload(encrypted_protected_payload);
 
-            let proof = Proof::ArtProof(get_proof_system().prove(
-                proposal.prover_artefacts,
-                &[proposal.aux_secret_key],
-                &Sha3_256::digest(frame_tbs.encode_to_vec()?),
-            )?);
+            let proof = Proof::ArtProof(
+                validator.prove(&proposal, &Sha3_256::digest(frame_tbs.encode_to_vec()?))?,
+            );
             Frame::new(frame_tbs, proof)
         };
+
+        self.sended_frames.insert(frame.id(), ());
 
         Ok(frame)
     }
 
-    pub fn join_group_as(&mut self, user: User) -> Result<Frame> {
+    #[instrument(skip_all)]
+    pub fn leave_group(&mut self) -> Result<Frame>
+    where
+        R: CryptoRngCore,
+    {
         let mut validator = self.validator.lock().unwrap();
-
-        // Future epoch
-        let epoch = validator.epoch() + 1;
 
         let protected_payload_tbs = ProtectedPayloadTbs::new(
             self.seq_num,
             Utc::now(),
-            vec![Payload::Action(GroupActionPayload::JoinGroup(user))],
-            Sender::LeafId(public_key_to_id(validator.leaf_public_key())),
+            vec![],
+            Sender::UserId(public_key_to_id(self.identity_public_key())),
+            vec![],
         );
 
-        let protected_payload = protected_payload_tbs.sign::<Sha3_256>(validator.leaf_key())?;
+        let protected_payload = protected_payload_tbs.sign::<Sha3_256>(self.identity_secret_key)?;
 
-        let proposal = validator.propose_update_key()?;
+        let proposal = validator.propose_leave_group()?;
 
         let mut frame_tbs = FrameTbs::new(
             self.group_info.id(),
-            epoch,
+            validator.epoch() + 1,
             self.nonce.advance(),
-            Some(GroupOperation::KeyUpdate(proposal.changes)),
+            Some(GroupOperation::LeaveGroup(proposal.change.clone().into())),
             vec![],
         );
 
@@ -490,12 +735,221 @@ impl GroupContext {
         )?;
         frame_tbs.set_protected_payload(encrypted_protected_payload);
 
-        let proof = Proof::ArtProof(get_proof_system().prove(
-            proposal.prover_artefacts,
-            &[proposal.aux_secret_key],
-            &Sha3_256::digest(frame_tbs.encode_to_vec()?),
-        )?);
-        Ok(Frame::new(frame_tbs, proof))
+        let proof = Proof::ArtProof(
+            validator.prove(&proposal, &Sha3_256::digest(frame_tbs.encode_to_vec()?))?,
+        );
+        let frame = Frame::new(frame_tbs, proof);
+
+        self.sended_frames.insert(frame.id(), ());
+
+        Ok(frame)
+    }
+
+    #[instrument(skip_all)]
+    pub fn change_user(&mut self, name: Option<String>, picture: Option<Vec<u8>>) -> Result<Frame>
+    where
+        R: CryptoRngCore,
+    {
+        let mut validator = self.validator.lock().unwrap();
+
+        let mut user = self
+            .group_info
+            .members()
+            .get(&public_key_to_id(self.identity_public_key()))
+            .ok_or(Error::InvalidGroup)?
+            .to_owned();
+
+        if let Some(name) = name {
+            user.name = name;
+        }
+
+        if let Some(picture) = picture {
+            user.picture = picture
+        }
+
+        let protected_payload_tbs = ProtectedPayloadTbs::new(
+            self.seq_num,
+            Utc::now(),
+            vec![],
+            Sender::UserId(public_key_to_id(self.identity_public_key())),
+            vec![models::payload::GroupActionPayload::ChangeUser(user)],
+        );
+
+        let protected_payload = protected_payload_tbs.sign::<Sha3_256>(self.identity_secret_key)?;
+
+        // Predict add member changes
+        let frame = if self.is_last_sender {
+            let mut frame_tbs = FrameTbs::new(
+                self.group_info.id(),
+                validator.epoch(),
+                self.nonce.advance(),
+                None,
+                vec![],
+            );
+
+            let stage_key = validator.stage_key();
+
+            let encrypted_protected_payload = encrypt(
+                &stage_key,
+                &protected_payload.encode_to_vec(),
+                &frame_tbs.associated_data::<Sha3_256>()?,
+            )?;
+            frame_tbs.set_protected_payload(encrypted_protected_payload);
+
+            frame_tbs.prove_schnorr::<Sha3_256>(validator.tree_key_preview())?
+        } else {
+            let proposal = validator.propose_update_key()?;
+
+            let mut frame_tbs = FrameTbs::new(
+                self.group_info.id(),
+                validator.epoch() + 1,
+                self.nonce.advance(),
+                Some(GroupOperation::KeyUpdate(proposal.change.clone().into())),
+                vec![],
+            );
+
+            let encrypted_protected_payload = encrypt(
+                &proposal.stage_key,
+                &protected_payload.encode_to_vec(),
+                &frame_tbs.associated_data::<Sha3_256>()?,
+            )?;
+            frame_tbs.set_protected_payload(encrypted_protected_payload);
+
+            let proof = Proof::ArtProof(
+                validator.prove(&proposal, &Sha3_256::digest(frame_tbs.encode_to_vec()?))?,
+            );
+            Frame::new(frame_tbs, proof)
+        };
+
+        self.sended_frames.insert(frame.id(), ());
+
+        Ok(frame)
+    }
+
+    #[instrument(skip_all)]
+    pub fn change_group(&mut self, name: Option<String>, picture: Option<Vec<u8>>) -> Result<Frame>
+    where
+        R: CryptoRngCore,
+    {
+        let mut validator = self.validator.lock().unwrap();
+
+        let mut group_info = self.group_info.clone();
+
+        if let Some(name) = name {
+            group_info.name = name;
+        }
+
+        if let Some(picture) = picture {
+            group_info.picture = picture
+        }
+
+        let protected_payload_tbs = ProtectedPayloadTbs::new(
+            self.seq_num,
+            Utc::now(),
+            vec![],
+            Sender::UserId(public_key_to_id(self.identity_public_key())),
+            vec![models::payload::GroupActionPayload::ChangeGroup(group_info)],
+        );
+
+        let protected_payload = protected_payload_tbs.sign::<Sha3_256>(self.identity_secret_key)?;
+
+        // Predict add member changes
+        let frame = if self.is_last_sender {
+            let mut frame_tbs = FrameTbs::new(
+                self.group_info.id(),
+                validator.epoch(),
+                self.nonce.advance(),
+                None,
+                vec![],
+            );
+
+            let stage_key = validator.stage_key();
+
+            let encrypted_protected_payload = encrypt(
+                &stage_key,
+                &protected_payload.encode_to_vec(),
+                &frame_tbs.associated_data::<Sha3_256>()?,
+            )?;
+            frame_tbs.set_protected_payload(encrypted_protected_payload);
+
+            frame_tbs.prove_schnorr::<Sha3_256>(validator.tree_key_preview())?
+        } else {
+            let proposal = validator.propose_update_key()?;
+
+            let mut frame_tbs = FrameTbs::new(
+                self.group_info.id(),
+                validator.epoch() + 1,
+                self.nonce.advance(),
+                Some(GroupOperation::KeyUpdate(proposal.change.clone().into())),
+                vec![],
+            );
+
+            let encrypted_protected_payload = encrypt(
+                &proposal.stage_key,
+                &protected_payload.encode_to_vec(),
+                &frame_tbs.associated_data::<Sha3_256>()?,
+            )?;
+            frame_tbs.set_protected_payload(encrypted_protected_payload);
+
+            let proof = Proof::ArtProof(
+                validator.prove(&proposal, &Sha3_256::digest(frame_tbs.encode_to_vec()?))?,
+            );
+            Frame::new(frame_tbs, proof)
+        };
+
+        self.sended_frames.insert(frame.id(), ());
+
+        Ok(frame)
+    }
+
+    #[instrument(skip_all)]
+    pub fn join_group_as(&mut self, mut user: User) -> Result<Frame>
+    where
+        R: CryptoRngCore,
+    {
+        let mut validator = self.validator.lock().unwrap();
+
+        *user.leaf_key_mut() = validator.leaf_public_key();
+
+        // Future epoch
+        let epoch = validator.epoch() + 1;
+
+        let protected_payload_tbs = ProtectedPayloadTbs::new(
+            self.seq_num,
+            Utc::now(),
+            vec![],
+            Sender::LeafId(public_key_to_id(validator.leaf_public_key())),
+            vec![GroupActionPayload::JoinGroup(user)],
+        );
+
+        let protected_payload = protected_payload_tbs.sign::<Sha3_256>(validator.leaf_key())?;
+
+        let proposal = validator.propose_update_key()?;
+
+        let mut frame_tbs = FrameTbs::new(
+            self.group_info.id(),
+            epoch,
+            self.nonce.advance(),
+            Some(GroupOperation::KeyUpdate(proposal.change.clone().into())),
+            vec![],
+        );
+
+        let encrypted_protected_payload = encrypt(
+            &proposal.stage_key,
+            &protected_payload.encode_to_vec(),
+            &frame_tbs.associated_data::<Sha3_256>()?,
+        )?;
+        frame_tbs.set_protected_payload(encrypted_protected_payload);
+
+        let proof = Proof::ArtProof(
+            validator.prove(&proposal, &Sha3_256::digest(frame_tbs.encode_to_vec()?))?,
+        );
+
+        let frame = Frame::new(frame_tbs, proof);
+
+        self.sended_frames.insert(frame.id(), ());
+
+        Ok(frame)
     }
 
     fn compute_leaf_secret_for_invitee(
@@ -541,10 +995,28 @@ impl GroupContext {
 
     pub fn sign_with_tk(&self, msg: &[u8]) -> Result<Vec<u8>> {
         let validator = self.validator.lock().unwrap();
+
+        debug!(
+            tree_key = ?validator.tree_key_preview(),
+            tree_public_key = ?validator.tree_public_key_preview(),
+            "sign_with_tk"
+        );
+
         Ok(schnorr::sign(
-            &vec![validator.tree_key()],
-            &vec![validator.tree_public_key()],
+            &vec![validator.tree_key_preview()],
+            &vec![validator.tree_public_key_preview()],
             msg,
         )?)
+    }
+
+    pub fn tree(&self) -> PublicArt<CortadoAffine> {
+        self.validator.lock().unwrap().tree().clone()
+    }
+
+    pub fn commited_tree(&self) -> Result<PublicArt<CortadoAffine>> {
+        let mut tree = self.validator.lock().unwrap().tree().clone();
+        tree.commit()?;
+
+        Ok(tree)
     }
 }

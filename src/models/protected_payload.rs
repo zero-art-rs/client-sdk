@@ -3,11 +3,12 @@ use chrono::{DateTime, Utc};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use prost::Message;
 use sha3::Digest;
+use tracing::{instrument, trace};
 use zrt_crypto::schnorr;
 
 use crate::{
     errors::{Error, Result},
-    models::payload::Payload,
+    models::payload::GroupActionPayload,
     zero_art_proto,
 };
 
@@ -35,12 +36,14 @@ impl ProtectedPayload {
     }
 
     // Verify signature
+    #[instrument]
     pub fn verify<D: Digest>(&self, public_key: CortadoAffine) -> Result<()> {
-        Ok(schnorr::verify(
-            &self.signature,
-            &vec![public_key],
-            &D::digest(self.protected_payload_tbs.encode_to_vec()),
-        )?)
+        let msg = D::digest(self.protected_payload_tbs.encode_to_vec());
+        trace!(
+            "Msg: {:?}",
+            D::digest(self.protected_payload_tbs.encode_to_vec())
+        );
+        Ok(schnorr::verify(&self.signature, &vec![public_key], &msg)?)
     }
 
     // Serialization
@@ -83,22 +86,25 @@ impl From<ProtectedPayload> for zero_art_proto::ProtectedPayload {
 pub struct ProtectedPayloadTbs {
     seq_num: u64,
     created: DateTime<Utc>,
-    payloads: Vec<Payload>,
+    content: Vec<u8>,
     sender: Sender,
+    group_actions: Vec<GroupActionPayload>,
 }
 
 impl ProtectedPayloadTbs {
     pub fn new(
         seq_num: u64,
         created: DateTime<Utc>,
-        payloads: Vec<Payload>,
+        content: Vec<u8>,
         sender: Sender,
+        group_actions: Vec<GroupActionPayload>,
     ) -> Self {
         Self {
             seq_num,
             created,
-            payloads,
+            content,
             sender,
+            group_actions,
         }
     }
 
@@ -112,22 +118,29 @@ impl ProtectedPayloadTbs {
         &self.created
     }
 
-    pub fn payloads(&self) -> &[Payload] {
-        &self.payloads
+    pub fn content(&self) -> &[u8] {
+        &self.content
     }
 
     pub fn sender(&self) -> &Sender {
         &self.sender
     }
 
+    pub fn group_actions(&self) -> &[GroupActionPayload] {
+        &self.group_actions
+    }
+
     // Sign payload and return ProtectedPayload
+    #[instrument]
     pub fn sign<D: Digest>(self, secret_key: ScalarField) -> Result<ProtectedPayload> {
         let public_key = (CortadoAffine::generator() * secret_key).into_affine();
-        let signature = schnorr::sign(
-            &vec![secret_key],
-            &vec![public_key],
-            &D::digest(self.encode_to_vec()),
-        )?;
+        let msg = D::digest(self.encode_to_vec());
+        trace!(
+            Msg = ?msg,
+            public_key = ?public_key,
+            "Sign message:"
+        );
+        let signature = schnorr::sign(&vec![secret_key], &vec![public_key], &msg)?;
         Ok(ProtectedPayload {
             protected_payload_tbs: self,
             signature,
@@ -154,17 +167,18 @@ impl TryFrom<zero_art_proto::ProtectedPayloadTbs> for ProtectedPayloadTbs {
             DateTime::from_timestamp(timestamp_proto.seconds, timestamp_proto.nanos as u32)
                 .ok_or(Error::RequiredFieldAbsent)?;
         let sender = value.sender.ok_or(Error::RequiredFieldAbsent)?.into();
-        let payloads = value
-            .payload
+        let group_actions = value
+            .group_actions
             .into_iter()
-            .map(Payload::try_from)
-            .collect::<Result<Vec<Payload>>>()?;
+            .map(GroupActionPayload::try_from)
+            .collect::<Result<Vec<GroupActionPayload>>>()?;
 
         Ok(Self {
             seq_num: value.seq_num,
             created,
-            payloads,
+            content: value.content,
             sender,
+            group_actions,
         })
     }
 }
@@ -175,16 +189,17 @@ impl From<ProtectedPayloadTbs> for zero_art_proto::ProtectedPayloadTbs {
             seconds: value.created.timestamp(),
             nanos: value.created.timestamp_subsec_nanos() as i32,
         };
-        let payload = value
-            .payloads
+        let group_actions = value
+            .group_actions
             .into_iter()
-            .map(zero_art_proto::Payload::from)
-            .collect::<Vec<zero_art_proto::Payload>>();
+            .map(zero_art_proto::GroupActionPayload::from)
+            .collect::<Vec<zero_art_proto::GroupActionPayload>>();
         let sender = value.sender.into();
         Self {
             seq_num: value.seq_num,
             created: Some(created),
-            payload,
+            content: value.content,
+            group_actions,
             sender: Some(sender),
         }
     }
@@ -194,6 +209,15 @@ impl From<ProtectedPayloadTbs> for zero_art_proto::ProtectedPayloadTbs {
 pub enum Sender {
     UserId(String),
     LeafId(String),
+}
+
+impl Sender {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::LeafId(id) => id,
+            Self::UserId(id) => id,
+        }
+    }
 }
 
 impl Default for Sender {

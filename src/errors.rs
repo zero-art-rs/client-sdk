@@ -2,15 +2,16 @@ use ark_serialize::SerializationError;
 use bulletproofs::r1cs::R1CSError;
 use prost::{DecodeError, UnknownEnumValue};
 use thiserror::Error;
-use zrt_art::errors::ARTError;
+use zrt_art::errors::ArtError;
+use zrt_zk::errors::ZKError;
 
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("ART error")]
-    ArtError(#[from] ARTError),
+    ArtError(#[from] ArtError),
     #[error("Serialization error")]
     SerializationError(#[from] SerializationError),
-    #[error("Cryptography error")]
+    #[error("Cryptography error {0}")]
     CryptoError(#[from] zrt_crypto::CryptoError),
     #[error("Decode error")]
     DecodeError(#[from] DecodeError),
@@ -23,7 +24,9 @@ pub enum Error {
     #[error("Required field absent")]
     RequiredFieldAbsent,
     #[error("AES encryption error")]
-    AesError,
+    AesEncryptionError,
+    #[error("AES decryption error")]
+    AesDecryptionError,
     #[error("Unknown enum value")]
     UnknownEnumError(#[from] UnknownEnumValue),
     #[error("ART logic error")]
@@ -34,6 +37,8 @@ pub enum Error {
     InvalidGroup,
     #[error("Invalid length")]
     InvalidLength,
+    #[error("Invalid node")]
+    InvalidNode,
     #[error("Path to the given node does not exist")]
     PathNotFound,
     #[error("Cannot remove the node: insufficient proximity")]
@@ -54,6 +59,8 @@ pub enum Error {
     UserRemovedFromGroup,
     #[error("User don't have permission for action")]
     Forbidden,
+    #[error("Failure in prover core")]
+    ZK(#[from] ZKError),
 
     #[error("Changes already applied or merged")]
     ChangesAlreadyApplied,

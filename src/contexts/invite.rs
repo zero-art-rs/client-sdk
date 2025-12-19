@@ -1,7 +1,7 @@
 use crate::{
     contexts::group::{GroupContext, Nonce},
-    core::impls::concurrent::linear_keyed_validator::LinearKeyedValidator,
     errors::{Error, Result},
+    keyed_validator::KeyedValidator,
     models::{
         group_info::GroupInfo,
         invite::{Invite, Invitee, ProtectedInviteData},
@@ -9,12 +9,13 @@ use crate::{
     utils::{decrypt, hkdf},
 };
 use ark_ec::{AffineRepr, CurveGroup};
+use ark_std::rand::{SeedableRng, rngs::StdRng, thread_rng};
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use sha3::Sha3_256;
 use tracing::{debug, info, instrument, trace};
 use uuid::Uuid;
-use zrt_art::types::{PrivateART, PublicART};
+use zrt_art::art::{PrivateArt, PublicArt};
 use zrt_crypto::schnorr;
 
 pub struct InviteContext {
@@ -38,12 +39,7 @@ impl InviteContext {
         trace!("SPK secret key: {:?}", spk_secret_key);
         trace!("Invitee: {:?}", invite.invite_tbs().invitee());
 
-        println!("Identity secret key: {:?}", identity_secret_key);
-        println!("SPK secret key: {:?}", spk_secret_key);
-        println!("Invitee: {:?}", invite.invite_tbs().invitee());
-
         trace!("Invite signature: {:?}", invite.signature());
-        println!("Invite signature: {:?}", invite.signature());
         invite.verify::<Sha3_256>(invite.invite_tbs().inviter_public_key())?;
         debug!("Invite signature verified");
 
@@ -51,9 +47,6 @@ impl InviteContext {
         let ephemeral_public_key = invite.invite_tbs().ephemeral_public_key();
         trace!("Inviter public key: {:?}", inviter_public_key);
         trace!("Ephemeral public key: {:?}", ephemeral_public_key);
-
-        println!("Inviter public key: {:?}", inviter_public_key);
-        println!("Ephemeral public key: {:?}", ephemeral_public_key);
 
         let leaf_secret = compute_invite_leaf_secret(
             invite.invite_tbs().invitee(),
@@ -65,8 +58,6 @@ impl InviteContext {
         debug!("Invite leaf secret computed");
         trace!("Invite leaf secret: {:?}", leaf_secret);
 
-        println!("Invite leaf secret: {:?}", leaf_secret);
-
         let invite_encryption_key = hkdf(
             Some(b"invite-key-derivation"),
             &crate::utils::serialize(leaf_secret)?,
@@ -74,16 +65,12 @@ impl InviteContext {
         debug!("Invite encryption key derived");
         trace!("Invite encryption key: {:?}", invite_encryption_key);
 
-        println!("Invite encryption key: {:?}", invite_encryption_key);
-
         let protected_invite_data = decrypt(
             &invite_encryption_key,
             invite.invite_tbs().protected_invite_data(),
             &[],
         )?;
-        println!("Protected invite data: {:?}", protected_invite_data);
         let protected_invite_data = ProtectedInviteData::decode(&protected_invite_data)?;
-        println!("Protected invite data: {:?}", protected_invite_data);
 
         Ok(Self {
             identity_secret_key,
@@ -95,6 +82,11 @@ impl InviteContext {
     }
 
     pub fn sign_as_identity(&self, msg: &[u8]) -> Result<Vec<u8>> {
+        debug!(
+            identity_secret_key = ?self.identity_secret_key,
+            identity_public_key = ?self.identity_public_key(),
+            "sign_as_identity"
+        );
         Ok(schnorr::sign(
             &vec![self.identity_secret_key],
             &vec![self.identity_public_key()],
@@ -103,6 +95,11 @@ impl InviteContext {
     }
 
     pub fn sign_as_leaf(&self, msg: &[u8]) -> Result<Vec<u8>> {
+        debug!(
+            identity_secret_key = ?self.leaf_secret,
+            identity_public_key = ?self.leaf_public_key(),
+            "sign_as_leaf"
+        );
         Ok(schnorr::sign(
             &vec![self.leaf_secret],
             &vec![self.leaf_public_key()],
@@ -127,11 +124,16 @@ impl InviteContext {
         (CortadoAffine::generator() * self.leaf_secret).into_affine()
     }
 
-    pub fn upgrade(self, art: PublicART<CortadoAffine>) -> Result<GroupContext> {
-        let base_art = PrivateART::from_public_art_and_secret(art, self.leaf_secret)?;
+    pub fn upgrade(self, art: PublicArt<CortadoAffine>) -> Result<GroupContext<StdRng>> {
+        let base_art = PrivateArt::new(art, self.leaf_secret)?;
         Ok(GroupContext::from_parts(
             self.identity_secret_key,
-            LinearKeyedValidator::new(base_art, self.stk, self.epoch),
+            KeyedValidator::new(
+                base_art,
+                self.stk,
+                self.epoch,
+                StdRng::from_rng(thread_rng()).unwrap(),
+            ),
             GroupInfo::new(self.group_id, String::new(), Utc::now(), vec![]),
             0,
             Nonce::new(0),
@@ -156,11 +158,6 @@ fn compute_invite_leaf_secret(
             identity_public_key,
             spk_public_key,
         } => {
-            println!("Identity public key: {:?}", identity_public_key);
-            println!("Owned identity public key: {:?}", owned_identity_public_key);
-            println!("SPK public key: {:?}", spk_public_key);
-            println!("Owned SPK public key: {:?}", owned_spk_public_key);
-
             if identity_public_key != owned_identity_public_key {
                 return Err(Error::InvalidInput);
             }
