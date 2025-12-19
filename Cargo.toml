@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-zrt-zk = { git = "https://github.com/zero-art-rs/core.git", branch = "feature/zrt-art-refactor" }
-zrt-art = { git = "https://github.com/zero-art-rs/core.git", branch = "feature/zrt-art-refactor" }
-zrt-crypto = { git = "https://github.com/zero-art-rs/core.git", branch = "feature/zrt-art-refactor" }
-cortado = { git = "https://github.com/zero-art-rs/core.git", branch = "feature/zrt-art-refactor" }
+zrt-zk = { git = "https://github.com/zero-art-rs/core.git", tag = "zrt-zk-v0.3.0" }
+zrt-art = { git = "https://github.com/zero-art-rs/core.git", tag = "zrt-art-v0.3.0" }
+zrt-crypto = { git = "https://github.com/zero-art-rs/core.git", tag = "zrt-crypto-v0.1.0" }
+cortado = { git = "https://github.com/zero-art-rs/core.git", tag = "cortado-v0.1.0" }
 bulletproofs = { version = "5.0.0", git="https://github.com/zero-art-rs/bulletproofs", features=["yoloproofs"] }
 prost = "0.14.1"
 prost-types = "0.14.1"
