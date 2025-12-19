@@ -6,13 +6,12 @@ use ark_ff::PrimeField;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use hkdf::Hkdf;
-use sha3::{Digest, Sha3_256};
-use zrt_art::changes::branch_change::BranchChange;
+use sha3::Sha3_256;
 use zrt_crypto::x3dh::{x3dh_a, x3dh_b};
 
 use crate::{
     errors::{Error, Result},
-    types::{ChangesID, StageKey},
+    types::StageKey,
 };
 
 pub fn encrypt(stage_key: &StageKey, plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
@@ -36,7 +35,7 @@ pub fn encrypt(stage_key: &StageKey, plaintext: &[u8], aad: &[u8]) -> Result<Vec
                 aad,
             },
         )
-        .map_err(|_| Error::AesError)
+        .map_err(|_| Error::AesEncryptionError)
 }
 
 pub fn decrypt(stage_key: &StageKey, ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
@@ -60,7 +59,7 @@ pub fn decrypt(stage_key: &StageKey, ciphertext: &[u8], aad: &[u8]) -> Result<Ve
                 aad,
             },
         )
-        .map_err(|_| Error::AesError)
+        .map_err(|_| Error::AesDecryptionError)
 }
 
 pub fn compute_leaf_secret_a(
@@ -127,8 +126,4 @@ pub fn derive_invite_key(leaf_key: ScalarField) -> Result<[u8; 32]> {
 
 pub fn derive_encryption_key(stage_key: &StageKey) -> Result<StageKey> {
     hkdf(Some(b"encryption-key-derivation"), stage_key)
-}
-
-pub fn compute_change_id(changes: &BranchChange<CortadoAffine>) -> Result<ChangesID> {
-    Ok(Sha3_256::digest(postcard::to_allocvec(&changes)?).to_vec()[..8].try_into()?)
 }

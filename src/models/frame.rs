@@ -1,22 +1,30 @@
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
 use ark_ec::{AffineRepr, CurveGroup};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use prost::Message;
-use sha3::Digest;
-use zrt_art::art::art_types::{PublicArt, PublicZeroArt};
-use zrt_art::changes::VerifiableChange;
+use sha3::{Digest, Sha3_256};
+use tracing::debug;
+use zrt_art::art::PublicArt;
 use zrt_art::changes::branch_change::{BranchChange, BranchChangeType};
 use zrt_crypto::schnorr;
 
 use uuid::Uuid;
-use zrt_zk::EligibilityRequirement;
 use zrt_zk::art::ArtProof;
 
 use crate::{
     errors::{Error, Result},
     zero_art_proto,
 };
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, PartialOrd, Ord, Eq, Hash)]
+pub struct FrameId([u8; 32]);
+
+impl Display for FrameId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(&self.0))
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct Frame {
@@ -27,6 +35,11 @@ pub struct Frame {
 impl Frame {
     pub fn new(frame_tbs: FrameTbs, proof: Proof) -> Self {
         Self { frame_tbs, proof }
+    }
+
+    pub fn id(&self) -> FrameId {
+        let id = Sha3_256::digest(self.encode_to_vec().unwrap());
+        FrameId(id.into())
     }
 
     // Getters
@@ -50,24 +63,6 @@ impl Frame {
             Proof::ArtProof(_) => return Err(Error::InvalidVerificationMethod),
         }
 
-        Ok(())
-    }
-
-    pub fn verify_art<D: Digest>(
-        &self,
-        branch_change: BranchChange<CortadoAffine>,
-        public_zero_art: PublicZeroArt,
-        eligibility_requirement: EligibilityRequirement,
-    ) -> Result<()> {
-        match &self.proof {
-            Proof::SchnorrSignature(_) => return Err(Error::InvalidVerificationMethod),
-            Proof::ArtProof(proof) => branch_change.verify(
-                &public_zero_art,
-                &D::digest(self.frame_tbs.encode_to_vec()?),
-                eligibility_requirement,
-                proof,
-            )?,
-        }
         Ok(())
     }
 
@@ -209,32 +204,24 @@ impl FrameTbs {
 
     pub fn prove_schnorr<D: Digest>(self, secret_key: ScalarField) -> Result<Frame> {
         let public_key = (CortadoAffine::generator() * secret_key).into_affine();
-        let signature = schnorr::sign(
-            &vec![secret_key],
-            &vec![public_key],
-            &D::digest(self.encode_to_vec()?),
-        )?;
+        let msg = D::digest(self.encode_to_vec()?);
+        let signature = schnorr::sign(&vec![secret_key], &vec![public_key], &msg)?;
+
+        debug!(
+            public_key = ?public_key,
+            msg = ?msg,
+            "prove_schnorr"
+        );
+
         Ok(Frame {
             frame_tbs: self,
             proof: Proof::SchnorrSignature(signature),
         })
     }
 
-    // pub fn prove_art<D: Digest>(
-    //     self,
-    //     prover_artefacts: ProverArtefacts<CortadoAffine>,
-    //     secret_key: ScalarField,
-    // ) -> Result<Frame> {
-    //     let proof = get_proof_system().prove(
-    //         prover_artefacts,
-    //         &[secret_key],
-    //         &D::digest(self.encode_to_vec()?),
-    //     )?;
-    //     Ok(Frame {
-    //         frame_tbs: self,
-    //         proof: Proof::ArtProof(proof),
-    //     })
-    // }
+    pub fn digest<D: Digest>(&self) -> Result<Vec<u8>> {
+        Ok(D::digest(self.encode_to_vec()?).to_vec())
+    }
 
     // Serialization
     pub fn encode_to_vec(&self) -> Result<Vec<u8>> {

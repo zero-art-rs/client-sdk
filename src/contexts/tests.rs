@@ -1,12 +1,12 @@
 use ark_ff::UniformRand;
 use ark_std::rand::{SeedableRng, rngs::StdRng};
 use chrono::Utc;
-use tracing::trace;
+use tracing::{info, trace};
 use uuid::Uuid;
 
 use ark_ec::{AffineRepr, CurveGroup};
 use sha3::Sha3_256;
-use zrt_art::art::art_types::PublicArt;
+use zrt_art::art::PublicArt;
 
 use crate::{
     contexts::{group::GroupContext, invite::InviteContext},
@@ -166,7 +166,11 @@ fn test_join_group() {
         .expect("Failed to create invite context");
 
     let mut member_group_context = invite_context
-        .upgrade(group_context.tree())
+        .upgrade(
+            group_context
+                .commited_tree()
+                .expect("Public tree must be commitable"),
+        )
         .expect("Failed to upgrade group context");
 
     assert_eq!(
@@ -174,6 +178,9 @@ fn test_join_group() {
         0,
         "If invite context was upgraded to group context, members should be empty"
     );
+    // TODO: can't validate frame, which is already applied.
+    // member_group_context.update();
+
     member_group_context
         .process_frame(frame)
         .expect("Failed to process add member frame for member");
@@ -259,11 +266,15 @@ fn test_invite_many_members_and_sync() {
             .expect("Failed to process add member proposal");
 
         frames.push(frame);
-        trees.push(group_context.tree());
+        trees.push(
+            group_context
+                .commited_tree()
+                .expect("Public tree must be commitable"),
+        );
         invites.push(invite);
     }
 
-    let mut contexts: Vec<GroupContext> = Vec::with_capacity(members_secrets.len());
+    let mut contexts: Vec<GroupContext<StdRng>> = Vec::with_capacity(members_secrets.len());
 
     for (i, secret_key) in members_secrets.iter().enumerate() {
         let invite_context = InviteContext::new(*secret_key, None, invites[i].clone())
@@ -347,10 +358,10 @@ fn test_invite_many_members_and_sync() {
 
 #[test]
 fn test_remove_member() {
-    // let _ = tracing_subscriber::fmt()
-    //     .with_max_level(tracing::Level::TRACE) // щоб бачили trace/debug/info
-    //     .with_test_writer() // щоб писало в буфер тестів
-    //     .try_init();
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_test_writer()
+        .try_init();
     let mut rng = StdRng::seed_from_u64(0);
 
     let group_id = Uuid::new_v4();
@@ -395,11 +406,15 @@ fn test_remove_member() {
             .expect("Failed to process add member proposal");
 
         frames.push(frame);
-        trees.push(group_context.tree());
+        trees.push(
+            group_context
+                .commited_tree()
+                .expect("Failed to commit tree"),
+        );
         invites.push(invite);
     }
 
-    let mut contexts: Vec<GroupContext> = Vec::with_capacity(members_secrets.len());
+    let mut contexts: Vec<GroupContext<StdRng>> = Vec::with_capacity(members_secrets.len());
 
     for (i, secret_key) in members_secrets.iter().enumerate() {
         let invite_context = InviteContext::new(*secret_key, None, invites[i].clone())
@@ -447,12 +462,10 @@ fn test_remove_member() {
     contexts[0]
         .process_frame(frame.clone())
         .expect("Failed to process frame");
+    let process_result = contexts[1].process_frame(frame.clone());
     assert!(
-        matches!(
-            contexts[1].process_frame(frame.clone()),
-            Err(Error::UserRemovedFromGroup)
-        ),
-        "Should error"
+        matches!(process_result, Err(Error::UserRemovedFromGroup),),
+        "Got {process_result:?}, while expected Err(Error::UserRemovedFromGroup)"
     );
     contexts[2]
         .process_frame(frame.clone())
@@ -492,8 +505,8 @@ fn test_remove_member() {
 #[test]
 fn test_change_group() {
     let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG) // щоб бачили trace/debug/info
-        .with_test_writer() // щоб писало в буфер тестів
+        .with_max_level(tracing::Level::DEBUG)
+        .with_test_writer()
         .try_init();
     let mut rng = StdRng::seed_from_u64(0);
 
@@ -511,7 +524,6 @@ fn test_change_group() {
 
     let (mut group_context, frame) = GroupContext::new(identity_secret_key, owner, group_info)
         .expect("Failed to create group context");
-        
 
     frame
         .verify_schnorr::<Sha3_256>(identity_public_key)
@@ -539,8 +551,8 @@ fn test_change_group() {
 #[test]
 fn test_send_frame() {
     let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG) // щоб бачили trace/debug/info
-        .with_test_writer() // щоб писало в буфер тестів
+        .with_max_level(tracing::Level::DEBUG)
+        .with_test_writer()
         .try_init();
     let mut rng = StdRng::seed_from_u64(0);
 
@@ -558,7 +570,6 @@ fn test_send_frame() {
 
     let (mut group_context, frame) = GroupContext::new(identity_secret_key, owner, group_info)
         .expect("Failed to create group context");
-        
 
     frame
         .verify_schnorr::<Sha3_256>(identity_public_key)
@@ -579,10 +590,10 @@ fn test_send_frame() {
 
 #[test]
 fn test_leave_member() {
-    // let _ = tracing_subscriber::fmt()
-    //     .with_max_level(tracing::Level::TRACE) // щоб бачили trace/debug/info
-    //     .with_test_writer() // щоб писало в буфер тестів
-    //     .try_init();
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_test_writer()
+        .try_init();
     let mut rng = StdRng::seed_from_u64(0);
 
     let group_id = Uuid::new_v4();
@@ -627,11 +638,15 @@ fn test_leave_member() {
             .expect("Failed to process add member proposal");
 
         frames.push(frame);
-        trees.push(group_context.tree());
+        trees.push(
+            group_context
+                .commited_tree()
+                .expect("Failed to commit tree"),
+        );
         invites.push(invite);
     }
 
-    let mut contexts: Vec<GroupContext> = Vec::with_capacity(members_secrets.len());
+    let mut contexts: Vec<GroupContext<StdRng>> = Vec::with_capacity(members_secrets.len());
 
     for (i, secret_key) in members_secrets.iter().enumerate() {
         let invite_context = InviteContext::new(*secret_key, None, invites[i].clone())
@@ -670,6 +685,7 @@ fn test_leave_member() {
         }
     }
 
+    info!("Leave group with contexts[3]");
     let frame = contexts[3]
         .leave_group()
         .expect("Failed to propose leave group");
