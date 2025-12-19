@@ -135,7 +135,6 @@ impl ProtectedPayloadTbs {
     pub fn sign<D: Digest>(self, secret_key: ScalarField) -> Result<ProtectedPayload> {
         let public_key = (CortadoAffine::generator() * secret_key).into_affine();
         let msg = D::digest(self.encode_to_vec());
-        // trace!("Msg: {:?}", msg);
         trace!(
             Msg = ?msg,
             public_key = ?public_key,

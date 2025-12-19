@@ -1,4 +1,3 @@
-use crate::models::frame::Proof;
 use ark_ec::AffineRepr;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use blake3;
@@ -30,7 +29,6 @@ pub enum GroupOperation<G: AffineRepr + CanonicalSerialize + CanonicalDeserializ
     },
 }
 
-// #[derive(Debug)]
 pub struct Proposal<G: AffineRepr + CanonicalSerialize + CanonicalDeserialize> {
     pub change: BranchChange<G>,
     pub stage_key: StageKey,

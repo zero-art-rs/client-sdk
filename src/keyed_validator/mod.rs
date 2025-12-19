@@ -1,11 +1,9 @@
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_serialize::CanonicalDeserialize;
-use ark_std::rand::rngs::StdRng;
-use ark_std::rand::{Rng, SeedableRng, thread_rng};
 use sha3::{Digest, Sha3_256};
 use std::fmt::{Debug, Formatter};
 use std::ops::Mul;
-use tracing::{debug, error, instrument, trace};
+use tracing::{debug, error, instrument};
 use zrt_art::art::{PrivateArt, PublicArt};
 use zrt_art::art_node::{ArtNode, ArtNodePreview, LeafStatus, TreeMethods};
 use zrt_art::changes::branch_change::{BranchChange, BranchChangeType};
@@ -14,7 +12,6 @@ use zrt_crypto::schnorr;
 use zrt_zk::EligibilityRequirement;
 use zrt_zk::engine::{ZeroArtProverEngine, ZeroArtVerifierEngine};
 
-use crate::contexts::group::GroupContext;
 use crate::types::{ChangeID, Identifiable, Proposal};
 use crate::utils::derive_stage_key;
 use crate::{
@@ -22,17 +19,12 @@ use crate::{
     errors::{Error, Result},
     models::frame,
     types::{GroupOperation, StageKey, ValidationResult, ValidationWithKeyResult},
-    utils::deserialize,
 };
 use crate::{errors, models};
 use cortado::{self, CortadoAffine, Fr as ScalarField};
-use prost_types::field_descriptor_proto::Type::Group;
 use rand_core::CryptoRngCore;
 use zrt_art::changes::ApplicableChange;
 use zrt_zk::art::ArtProof;
-
-// mod handlers;
-// mod merge_strategy;
 mod proposals;
 
 pub struct KeyedValidator<R> {
@@ -161,7 +153,6 @@ impl<R> KeyedValidator<R> {
                 None => {
                     // Verify schnorr signature
                     let public_key = self.art.public_art().preview().root().public_key();
-                    // let public_key = self.art.public_art().preview().root().public_key();
                     schnorr::verify(
                         signature,
                         &vec![public_key],
@@ -316,10 +307,6 @@ impl<R> KeyedValidator<R> {
                 (change, eligibility_requirement, operation)
             }
             (models::frame::GroupOperation::LeaveGroup(change), true) => {
-                // if self.art.node_index().eq(&change.node_index) {
-                //     return Err(Error::UserRemovedFromGroup)
-                // }
-
                 let eligibility_requirement = EligibilityRequirement::Member(
                     self.art.preview().node(&change.node_index)?.public_key(),
                 );
@@ -334,10 +321,6 @@ impl<R> KeyedValidator<R> {
                 (change, eligibility_requirement, operation)
             }
             (models::frame::GroupOperation::LeaveGroup(change), false) => {
-                // if self.art.node_index().eq(&change.node_index) {
-                //     return Err(Error::UserRemovedFromGroup)
-                // }
-
                 let eligibility_requirement = EligibilityRequirement::Member(
                     self.art.node(&change.node_index)?.data().public_key(),
                 );
@@ -360,8 +343,6 @@ impl<R> KeyedValidator<R> {
             "GroupOperation data"
         );
 
-        // let eligibility_requirement =
-        //     get_eligibility_requirement(self.art.public_art(), change, is_next_epoch)?;
         let verification_branch = if is_next_epoch {
             self.art
                 .preview()
@@ -402,14 +383,8 @@ impl<R> KeyedValidator<R> {
                 .inspect_err(|err| error!("Fail to apply change: {err}"))?
         };
 
-        // let root_secret_key = change.apply(&mut self.art)?;
-        // self.art.apply::<BranchChange<_>, _>(&change)?;
-
         let stage_key = if is_next_epoch {
             let stage_key = derive_stage_key(&self.upstream_stk, root_secret_key)?;
-            // let upstream_stk =
-            //     derive_stage_key(&self.upstream_stk, self.art.secrets().preview().root())?;
-
             self.base_stk = self.upstream_stk;
             self.upstream_stk = stage_key;
 
@@ -425,8 +400,6 @@ impl<R> KeyedValidator<R> {
         };
 
         Ok((Some(operation), stage_key))
-
-        // Err(Error::AesError)
     }
 
     pub fn sign_with_leaf_key(&self, message: &[u8]) -> Result<Vec<u8>> {

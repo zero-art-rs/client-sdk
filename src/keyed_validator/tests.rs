@@ -4,14 +4,11 @@ use crate::{
     utils::{derive_stage_key, encrypt},
 };
 use aes_gcm::aead::rand_core::CryptoRngCore;
-use ark_ec::CurveGroup;
 use ark_ff::UniformRand;
 use ark_std::rand::{SeedableRng, rngs::StdRng};
 use sha3::Digest;
-use std::ops::Mul;
 use tracing::trace;
 use uuid::Uuid;
-use zrt_zk::EligibilityArtefact;
 
 use super::*;
 
@@ -65,11 +62,6 @@ impl<R: CryptoRngCore> KeyedValidator<R> {
 
 #[test]
 fn test_sequential_invite_members() {
-    // let _ = tracing_subscriber::fmt()
-    //     .with_max_level(tracing::Level::TRACE) // щоб бачили trace/debug/info
-    //     .with_test_writer() // щоб писало в буфер тестів
-    //     .try_init();
-
     let mut rng = StdRng::seed_from_u64(0);
 
     // Create Private ART
@@ -212,10 +204,6 @@ fn test_sequential_invite_members_with_observer() {
         owner_keyed_validator.upstream_stk,
         observer_keyed_validator.upstream_stk
     );
-    // assert_eq!(
-    //     owner_keyed_validator.base_art,
-    //     observer_keyed_validator.base_art
-    // );
     assert_eq!(
         owner_keyed_validator.base_stk,
         observer_keyed_validator.base_stk
@@ -316,10 +304,6 @@ fn test_sequential_cross_key_updates() {
         owner_keyed_validator.upstream_stk,
         observer_keyed_validator.upstream_stk
     );
-    // assert_eq!(
-    //     owner_keyed_validator.base_art,
-    //     observer_keyed_validator.base_art
-    // );
     assert_eq!(
         owner_keyed_validator.base_stk,
         observer_keyed_validator.base_stk
@@ -622,14 +606,6 @@ fn test_create_validator2() {
         keyed_validator_1.stage_key(),
         "Validator upstream stk mismatch"
     );
-    // assert!(
-    //     keyed_validator_0.is_participant(),
-    //     "Validator 0 should participate in epoch"
-    // );
-    // assert!(
-    //     !keyed_validator_1.is_participant(),
-    //     "Validator 1 should not participate in epoch"
-    // );
 
     let proposal = keyed_validator_0
         .propose_update_key()
@@ -717,14 +693,6 @@ fn test_create_validator2() {
         keyed_validator_1.stage_key(),
         "Validator upstream stk mismatch"
     );
-    // assert!(
-    //     keyed_validator_0.is_participant(),
-    //     "Validator 0 should participate in epoch"
-    // );
-    // assert!(
-    //     keyed_validator_1.is_participant(),
-    //     "Validator 1 should participate in epoch"
-    // );
 
     let proposal = keyed_validator_1
         .propose_update_key()
@@ -775,12 +743,4 @@ fn test_create_validator2() {
         keyed_validator_1.stage_key(),
         "Validator upstream stk mismatch"
     );
-    // assert!(
-    //     !keyed_validator_0.is_participant(),
-    //     "Validator 0 should not participate in epoch"
-    // );
-    // assert!(
-    //     keyed_validator_1.is_participant(),
-    //     "Validator 1 should participate in epoch"
-    // );
 }

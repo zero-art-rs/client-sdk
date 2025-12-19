@@ -8,13 +8,10 @@ use crate::{
     utils::{derive_leaf_key, derive_stage_key},
 };
 use ark_ec::{AffineRepr, CurveGroup};
-use cortado::{self, CortadoAffine, Fr as ScalarField, Fr};
+use cortado::{self, CortadoAffine, Fr as ScalarField};
 use std::ops::Mul;
-use tracing::{debug, error, instrument};
-use zrt_art::{
-    art::ArtAdvancedOps,
-    art_node::{LeafStatus, TreeMethods},
-};
+use tracing::{error, instrument};
+use zrt_art::{art::ArtAdvancedOps, art_node::LeafStatus};
 use zrt_zk::EligibilityArtefact;
 
 impl<R> KeyedValidator<R> {
@@ -88,9 +85,6 @@ impl<R> KeyedValidator<R> {
                 .into(),
             vanishing_secret_key,
         )?;
-
-        // debug!("Eligibility artefact: {:?}", change.get_eligibility());
-        // debug!("Change ID: {}", change.id());
 
         Ok(RemoveMemberProposal {
             stage_key: derive_stage_key(&self.upstream_stk, tk)?,

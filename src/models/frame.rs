@@ -10,7 +10,6 @@ use zrt_art::changes::branch_change::{BranchChange, BranchChangeType};
 use zrt_crypto::schnorr;
 
 use uuid::Uuid;
-use zrt_zk::EligibilityRequirement;
 use zrt_zk::art::ArtProof;
 
 use crate::{
@@ -66,25 +65,6 @@ impl Frame {
 
         Ok(())
     }
-
-    // pub fn verify_art<D: Digest>(
-    //     &self,
-    //     branch_change: BranchChange<CortadoAffine>,
-    //     public_zero_art: PublicArt<CortadoAffine>,
-    //     eligibility_requirement: EligibilityRequirement,
-    //
-    // ) -> Result<()> {
-    //     match &self.proof {
-    //         Proof::SchnorrSignature(_) => return Err(Error::InvalidVerificationMethod),
-    //         Proof::ArtProof(proof) => branch_change.verify(
-    //             &public_zero_art,
-    //             &D::digest(self.frame_tbs.encode_to_vec()?),
-    //             eligibility_requirement,
-    //             proof,
-    //         )?,
-    //     }
-    //     Ok(())
-    // }
 
     // Serialization
     pub fn encode_to_vec(&self) -> Result<Vec<u8>> {
@@ -225,11 +205,7 @@ impl FrameTbs {
     pub fn prove_schnorr<D: Digest>(self, secret_key: ScalarField) -> Result<Frame> {
         let public_key = (CortadoAffine::generator() * secret_key).into_affine();
         let msg = D::digest(self.encode_to_vec()?);
-        let signature = schnorr::sign(
-            &vec![secret_key],
-            &vec![public_key],
-            &msg,
-        )?;
+        let signature = schnorr::sign(&vec![secret_key], &vec![public_key], &msg)?;
 
         debug!(
             public_key = ?public_key,
@@ -242,22 +218,6 @@ impl FrameTbs {
             proof: Proof::SchnorrSignature(signature),
         })
     }
-
-    // pub fn prove_art<D: Digest>(
-    //     self,
-    //     prover_artefacts: ProverArtefacts<CortadoAffine>,
-    //     secret_key: ScalarField,
-    // ) -> Result<Frame> {
-    //     let proof = get_proof_system().prove(
-    //         prover_artefacts,
-    //         &[secret_key],
-    //         &D::digest(self.encode_to_vec()?),
-    //     )?;
-    //     Ok(Frame {
-    //         frame_tbs: self,
-    //         proof: Proof::ArtProof(proof),
-    //     })
-    // }
 
     pub fn digest<D: Digest>(&self) -> Result<Vec<u8>> {
         Ok(D::digest(self.encode_to_vec()?).to_vec())

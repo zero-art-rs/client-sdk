@@ -4,7 +4,7 @@ use ark_std::rand::{SeedableRng, rngs::StdRng, thread_rng};
 use chrono::Utc;
 use cortado::{self, CortadoAffine, Fr as ScalarField};
 use rand_core::CryptoRngCore;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Mutex;
 use tracing::{Level, debug, error, info, instrument, span, trace};
@@ -72,19 +72,12 @@ impl GroupContext<StdRng> {
     ) -> Result<(Self, Frame)> {
         info!("Creating new group");
 
-        // trace!(
-        //     identity_secret_key = ?identity_secret_key,
-        //     user = ?user,
-        //     group_info = ?group_info,
-        //     "Creating new group"
-        // );
-
         debug!("Generating leaf secret");
         let leaf_secret = ScalarField::rand(&mut thread_rng());
         let leaf_key = (CortadoAffine::generator() * leaf_secret).into_affine();
         trace!(leaf_secret = ?leaf_secret, leaf_key = ?leaf_key, "Generate ART key pair");
         debug!("Making ART");
-        let base_art = PrivateArt::setup(&vec![leaf_secret])?;
+        let base_art = PrivateArt::setup(&[leaf_secret])?;
         let base_stk = derive_stage_key(&[0u8; 32], base_art.root_secret_key())?;
         // trace!(art = ?base_art, stage_key = ?base_stk, "Intitialize ART and stage key");
 
@@ -417,8 +410,6 @@ impl<R> GroupContext<R> {
                     debug!("OldPK: {:?}", old_public_key);
                     debug!("NewPK: {:?}", new_public_key);
                 }
-
-                // debug!("Group state: {:?}", self.group_info);
             }
             types::GroupOperation::LeaveGroup {
                 old_public_key,
@@ -538,9 +529,6 @@ impl<R> GroupContext<R> {
         protected_payload
             .verify::<Sha3_256>(self.identity_public_key())
             .unwrap();
-        // trace!("Valid with: {:?}", self.identity_public_key());
-        // trace!("Signature: {:?}", protected_payload.signature());
-        // trace!("Payload: {:?}", protected_payload);
 
         // Encryption
         let encrypted_protected_payload = encrypt(
@@ -552,9 +540,7 @@ impl<R> GroupContext<R> {
 
         // Proving
         let proof = Proof::ArtProof(
-            validator.prove(&proposal, &Sha3_256::digest(frame_tbs.encode_to_vec()?))?, // proposal
-                                                                                        //     .change
-                                                                                        //     .prove(&Sha3_256::digest(frame_tbs.encode_to_vec()?), None)?,
+            validator.prove(&proposal, &Sha3_256::digest(frame_tbs.encode_to_vec()?))?,
         );
         let frame = Frame::new(frame_tbs, proof);
 

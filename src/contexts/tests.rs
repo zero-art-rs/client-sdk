@@ -1,7 +1,7 @@
 use ark_ff::UniformRand;
 use ark_std::rand::{SeedableRng, rngs::StdRng};
 use chrono::Utc;
-use tracing::{debug, error, info, trace};
+use tracing::{info, trace};
 use uuid::Uuid;
 
 use ark_ec::{AffineRepr, CurveGroup};
@@ -166,7 +166,6 @@ fn test_join_group() {
         .expect("Failed to create invite context");
 
     let mut member_group_context = invite_context
-        // .upgrade(group_context.tree())
         .upgrade(
             group_context
                 .commited_tree()
@@ -360,8 +359,8 @@ fn test_invite_many_members_and_sync() {
 #[test]
 fn test_remove_member() {
     let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE) // щоб бачили trace/debug/info
-        .with_test_writer() // щоб писало в буфер тестів
+        .with_max_level(tracing::Level::TRACE)
+        .with_test_writer()
         .try_init();
     let mut rng = StdRng::seed_from_u64(0);
 
@@ -506,8 +505,8 @@ fn test_remove_member() {
 #[test]
 fn test_change_group() {
     let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG) // щоб бачили trace/debug/info
-        .with_test_writer() // щоб писало в буфер тестів
+        .with_max_level(tracing::Level::DEBUG)
+        .with_test_writer()
         .try_init();
     let mut rng = StdRng::seed_from_u64(0);
 
@@ -552,8 +551,8 @@ fn test_change_group() {
 #[test]
 fn test_send_frame() {
     let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG) // щоб бачили trace/debug/info
-        .with_test_writer() // щоб писало в буфер тестів
+        .with_max_level(tracing::Level::DEBUG)
+        .with_test_writer()
         .try_init();
     let mut rng = StdRng::seed_from_u64(0);
 
@@ -592,9 +591,8 @@ fn test_send_frame() {
 #[test]
 fn test_leave_member() {
     let _ = tracing_subscriber::fmt()
-        // .with_max_level(tracing::Level::TRACE) // щоб бачили trace/debug/info
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_test_writer() // щоб писало в буфер тестів
+        .with_test_writer()
         .try_init();
     let mut rng = StdRng::seed_from_u64(0);
 
