@@ -626,47 +626,8 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cortado"
-version = "0.1.0"
-source = "git+https://github.com/zero-art-rs/core.git?tag=cortado-v0.1.0#74d6d9af4568249909fbf74a3cbac627d6237a94"
-dependencies = [
- "ark-algebra-test-templates",
- "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-ff 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-std",
- "curve25519-dalek",
-]
-
-[[package]]
-name = "cortado"
-version = "0.1.0"
-source = "git+https://github.com/zero-art-rs/core.git?tag=zrt-art-v0.3.0#74d6d9af4568249909fbf74a3cbac627d6237a94"
-dependencies = [
- "ark-algebra-test-templates",
- "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-ff 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-std",
- "curve25519-dalek",
-]
-
-[[package]]
-name = "cortado"
-version = "0.1.0"
-source = "git+https://github.com/zero-art-rs/core.git?tag=zrt-crypto-v0.1.0#74d6d9af4568249909fbf74a3cbac627d6237a94"
-dependencies = [
- "ark-algebra-test-templates",
- "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-ff 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-std",
- "curve25519-dalek",
-]
-
-[[package]]
-name = "cortado"
-version = "0.1.0"
-source = "git+https://github.com/zero-art-rs/core.git?tag=zrt-zk-v0.3.0#74d6d9af4568249909fbf74a3cbac627d6237a94"
+version = "0.2.0"
+source = "git+https://github.com/zero-art-rs/core.git?tag=zrt-zk-v0.4.0#9c9f1c514d6d80a523068ef2c65a896121a4a275"
 dependencies = [
  "ark-algebra-test-templates",
  "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
@@ -2282,8 +2243,8 @@ dependencies = [
 
 [[package]]
 name = "zrt-art"
-version = "0.3.0"
-source = "git+https://github.com/zero-art-rs/core.git?tag=zrt-art-v0.3.0#74d6d9af4568249909fbf74a3cbac627d6237a94"
+version = "0.4.0"
+source = "git+https://github.com/zero-art-rs/core.git?tag=zrt-zk-v0.4.0#9c9f1c514d6d80a523068ef2c65a896121a4a275"
 dependencies = [
  "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
  "ark-ed25519",
@@ -2292,7 +2253,7 @@ dependencies = [
  "ark-std",
  "bulletproofs 5.0.1 (git+https://github.com/zero-art-rs/bulletproofs)",
  "chrono",
- "cortado 0.1.0 (git+https://github.com/zero-art-rs/core.git?tag=zrt-art-v0.3.0)",
+ "cortado",
  "criterion",
  "curve25519-dalek",
  "display_tree",
@@ -2306,12 +2267,12 @@ dependencies = [
  "tracing-subscriber",
  "tree-ds",
  "zkp",
- "zrt-zk 0.3.0 (git+https://github.com/zero-art-rs/core.git?tag=zrt-art-v0.3.0)",
+ "zrt-zk",
 ]
 
 [[package]]
 name = "zrt-client-sdk"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
@@ -2323,7 +2284,7 @@ dependencies = [
  "blake3",
  "bulletproofs 5.0.1 (git+https://github.com/zero-art-rs/bulletproofs)",
  "chrono",
- "cortado 0.1.0 (git+https://github.com/zero-art-rs/core.git?tag=cortado-v0.1.0)",
+ "cortado",
  "curve25519-dalek",
  "hex",
  "hkdf",
@@ -2345,16 +2306,16 @@ dependencies = [
  "zkp",
  "zrt-art",
  "zrt-crypto",
- "zrt-zk 0.3.0 (git+https://github.com/zero-art-rs/core.git?tag=zrt-zk-v0.3.0)",
+ "zrt-zk",
 ]
 
 [[package]]
 name = "zrt-crypto"
-version = "0.1.0"
-source = "git+https://github.com/zero-art-rs/core.git?tag=zrt-crypto-v0.1.0#74d6d9af4568249909fbf74a3cbac627d6237a94"
+version = "0.1.1"
+source = "git+https://github.com/zero-art-rs/core.git?tag=zrt-zk-v0.4.0#9c9f1c514d6d80a523068ef2c65a896121a4a275"
 dependencies = [
  "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "cortado 0.1.0 (git+https://github.com/zero-art-rs/core.git?tag=zrt-crypto-v0.1.0)",
+ "cortado",
  "hkdf",
  "rand 0.8.5",
  "rand_core 0.6.4",
@@ -2365,8 +2326,8 @@ dependencies = [
 
 [[package]]
 name = "zrt-zk"
-version = "0.3.0"
-source = "git+https://github.com/zero-art-rs/core.git?tag=zrt-art-v0.3.0#74d6d9af4568249909fbf74a3cbac627d6237a94"
+version = "0.4.0"
+source = "git+https://github.com/zero-art-rs/core.git?tag=zrt-zk-v0.4.0#9c9f1c514d6d80a523068ef2c65a896121a4a275"
 dependencies = [
  "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
  "ark-ed25519",
@@ -2375,35 +2336,7 @@ dependencies = [
  "ark-std",
  "bulletproofs 5.0.1 (git+https://github.com/zero-art-rs/bulletproofs)",
  "chrono",
- "cortado 0.1.0 (git+https://github.com/zero-art-rs/core.git?tag=zrt-art-v0.3.0)",
- "curve25519-dalek",
- "hex",
- "merlin",
- "once_cell",
- "postcard",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "serde",
- "thiserror 2.0.17",
- "tracing",
- "tracing-subscriber",
- "tree-ds",
- "zkp",
-]
-
-[[package]]
-name = "zrt-zk"
-version = "0.3.0"
-source = "git+https://github.com/zero-art-rs/core.git?tag=zrt-zk-v0.3.0#74d6d9af4568249909fbf74a3cbac627d6237a94"
-dependencies = [
- "ark-ec 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-ed25519",
- "ark-ff 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-serialize 0.5.0 (git+https://github.com/arkworks-rs/algebra?rev=7601bf9)",
- "ark-std",
- "bulletproofs 5.0.1 (git+https://github.com/zero-art-rs/bulletproofs)",
- "chrono",
- "cortado 0.1.0 (git+https://github.com/zero-art-rs/core.git?tag=zrt-zk-v0.3.0)",
+ "cortado",
  "curve25519-dalek",
  "hex",
  "merlin",
